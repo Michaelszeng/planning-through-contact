@@ -411,9 +411,6 @@ class PlanarPushingPlanner:
         if len(only_successful_res) == 0:
             return None
 
-        # if len(only_successful_res) == 0:
-        #     raise RuntimeError("No trajectories rounded succesfully")
-
         sorted_res = sorted(only_successful_res, key=lambda pair: pair[1].get_optimal_cost())
         paths, results = zip(*sorted_res)
 

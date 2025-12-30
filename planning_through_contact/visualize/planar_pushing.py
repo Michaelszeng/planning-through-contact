@@ -1434,6 +1434,7 @@ class PlanarPushingTrajectoryGeometry(LeafSystem):
             slider_geometry,
             scene_graph,
             self.slider_frame_id,
+            alpha=0.75,
             show_com=True,
         )
 
@@ -1441,7 +1442,13 @@ class PlanarPushingTrajectoryGeometry(LeafSystem):
             self.source_id,
             GeometryFrame("pusher"),
         )
-        _add_pusher_geometry(self.source_id, pusher_radius, scene_graph, self.pusher_frame_id)
+        _add_pusher_geometry(
+            self.source_id,
+            pusher_radius,
+            scene_graph,
+            self.pusher_frame_id,
+            alpha=0.75,
+        )
 
         GOAL_TRANSPARENCY = 0.3
         if self.visualize_goal:
@@ -1493,7 +1500,7 @@ class PlanarPushingTrajectoryGeometry(LeafSystem):
         scene_graph: SceneGraph,
         visualize_knot_points: bool = False,
         name: str = "traj_geometry ",
-    ) -> "PlanarPushingTrajectory":
+    ) -> "PlanarPushingTrajectoryGeometry":
         traj_geometry = builder.AddNamedSystem(
             name,
             cls(
@@ -1638,6 +1645,85 @@ def visualize_planar_pushing_start_and_goal(
     return ani
 
 
+def _add_trajectory_overlay_lines(
+    scene_graph: SceneGraph,
+    source_id,
+    traj: PlanarPushingTrajectory,
+    slider_color: RGB,
+    pusher_color: RGB,
+    name_prefix: str = "traj",
+    line_width: float = 0.003,
+    num_samples: int = 100,
+) -> None:
+    """
+    Add piecewise linear approximation of a trajectory as static line segments.
+    Draws both slider and pusher trajectories with separate colors.
+    Uses thin boxes to represent line segments (simpler than cylinders for 2D).
+    """
+    # Sample trajectory at regular intervals
+    times = np.linspace(traj.start_time, traj.end_time, num_samples)
+
+    # Extract slider and pusher positions
+    slider_positions = []
+    pusher_positions = []
+    for t in times:
+        slider_pose = traj.get_slider_planar_pose(t)
+        pusher_pose = traj.get_pusher_planar_pose(t)
+        slider_positions.append(slider_pose.pos().flatten())
+        pusher_positions.append(pusher_pose.pos().flatten())
+
+    # Height of the box (thin in z direction for 2D visualization)
+    box_height = 0.001
+
+    # Helper function to create line segments for a trajectory
+    def _create_line_segments(positions: List[npt.NDArray], prefix: str, obj_color: RGB):
+        for i in range(len(positions) - 1):
+            p1 = positions[i]
+            p2 = positions[i + 1]
+
+            # Compute midpoint and length
+            midpoint = (p1 + p2) / 2
+            segment_vec = p2 - p1
+            length = np.linalg.norm(segment_vec)
+
+            if length < 1e-6:
+                continue
+
+            # Simple 2D rotation around z-axis to align box with segment
+            angle = np.arctan2(segment_vec[1], segment_vec[0])
+
+            # Rotation matrix around z-axis (simple 2D rotation!)
+            cos_a = np.cos(angle)
+            sin_a = np.sin(angle)
+            R_matrix = np.array([[cos_a, -sin_a, 0], [sin_a, cos_a, 0], [0, 0, 1]])
+
+            transform = RigidTransform(RotationMatrix(R_matrix), np.array([midpoint[0], midpoint[1], 0.0]))
+
+            # Create thin box: length along x, width (line_width), height (thin in z)
+            box = DrakeBox(length, line_width, box_height)
+            geometry_id = scene_graph.RegisterAnchoredGeometry(
+                source_id,
+                GeometryInstance(
+                    transform,
+                    box,
+                    f"{prefix}_segment_{i}",
+                ),
+            )
+
+            # Assign color
+            scene_graph.AssignRole(
+                source_id,
+                geometry_id,
+                MakePhongIllustrationProperties(obj_color.diffuse()),
+            )
+
+    # Create line segments for slider trajectory
+    _create_line_segments(slider_positions, f"{name_prefix}_slider", slider_color)
+
+    # Create line segments for pusher trajectory
+    _create_line_segments(pusher_positions, f"{name_prefix}_pusher", pusher_color)
+
+
 def visualize_planar_pushing_trajectory(
     traj: PlanarPushingTrajectory,
     show: bool = False,
@@ -1645,6 +1731,7 @@ def visualize_planar_pushing_trajectory(
     filename: Optional[str] = None,
     visualize_knot_points: bool = False,
     lims: Optional[Tuple[float, float, float, float]] = None,
+    overlay_trajs: Optional[List[Tuple[PlanarPushingTrajectory, RGB, RGB]]] = None,
 ):
     if save:
         assert filename is not None
@@ -1659,6 +1746,18 @@ def visualize_planar_pushing_trajectory(
         scene_graph,
         visualize_knot_points,
     )
+
+    # Add trajectory overlays if provided
+    if overlay_trajs is not None:
+        for idx, (overlay_traj, slider_color, pusher_color) in enumerate(overlay_trajs):
+            _add_trajectory_overlay_lines(
+                scene_graph,
+                traj_geometry.source_id,
+                overlay_traj,
+                slider_color,
+                pusher_color,
+                name_prefix=f"overlay_traj_{idx}",
+            )
 
     if lims is None:
         x_min, x_max, y_min, y_max = traj.get_pos_limits(buffer=0.1)

@@ -264,6 +264,7 @@ class PlanarPushingMPC:
         save_video: bool = False,
         save_traj: bool = False,
         interpolate_video: bool = False,
+        overlay_traj: bool = False,
         animation_lims: Optional[Tuple[float, float, float, float]] = None,
         hardware: bool = False,
     ) -> Optional[PlanarPushingPath]:
@@ -320,12 +321,27 @@ class PlanarPushingMPC:
 
             if save_video:
                 if traj is not None:
+                    # Prepare overlay trajectories if requested
+                    overlay_trajs_arg = None
+                    if overlay_traj:
+                        # Original trajectory: black for both slider and pusher
+                        original_slider_color = COLORS["black"]
+                        original_pusher_color = COLORS["black"]
+                        # New trajectory: use object colors (slider=aquamarine, pusher=firebrick)
+                        new_slider_color = COLORS["aquamarine4"]
+                        new_pusher_color = COLORS["firebrick3"]
+                        overlay_trajs_arg = [
+                            (self.original_traj, original_slider_color, original_pusher_color),
+                            (traj, new_slider_color, new_pusher_color),
+                        ]
+
                     visualize_planar_pushing_trajectory(
                         traj,
                         save=True,
                         filename=f"{folder_name}/traj",
                         visualize_knot_points=not interpolate_video,
                         lims=animation_lims,
+                        overlay_trajs=overlay_trajs_arg,
                     )
 
         return path
