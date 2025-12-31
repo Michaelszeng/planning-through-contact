@@ -109,9 +109,7 @@ class LinTrajSegment:
         traj_type: TrajType = "first_order_hold",
     ) -> "LinTrajSegment":
         if len(knot_points.shape) == 1:  # (NUM_SAMPLES, )
-            knot_points = knot_points.reshape(
-                (1, -1)
-            )  # First/ZeroOrderHold expects values to be two-dimensional
+            knot_points = knot_points.reshape((1, -1))  # First/ZeroOrderHold expects values to be two-dimensional
 
         num_dims, num_samples = knot_points.shape
 
@@ -125,9 +123,7 @@ class LinTrajSegment:
                 # requires N knot point values and time values).
                 knot_point_times = np.linspace(start_time, end_time, num_samples + 1)
                 # Repeat last knot point to get the correct number of samples
-                samples = np.hstack(
-                    (knot_points, knot_points[:, -1].reshape((num_dims, 1)))
-                )
+                samples = np.hstack((knot_points, knot_points[:, -1].reshape((num_dims, 1))))
             else:
                 knot_point_times = np.linspace(start_time, end_time, num_samples)
                 samples = knot_points
@@ -252,13 +248,22 @@ class FaceContactTrajSegment(AbstractTrajSegment):
     ) -> "FaceContactTrajSegment":
         # FirstOrderHold
         p_WB_x = LinTrajSegment.from_knot_points(
-            knot_points.p_WB_xs, start_time, end_time, "first_order_hold"  # type: ignore
+            knot_points.p_WB_xs,
+            start_time,
+            end_time,
+            "first_order_hold",  # type: ignore
         )
         p_WB_y = LinTrajSegment.from_knot_points(
-            knot_points.p_WB_ys, start_time, end_time, "first_order_hold"  # type: ignore
+            knot_points.p_WB_ys,
+            start_time,
+            end_time,
+            "first_order_hold",  # type: ignore
         )
         lam = LinTrajSegment.from_knot_points(
-            knot_points.lams, start_time, end_time, "first_order_hold"  # type: ignore
+            knot_points.lams,
+            start_time,
+            end_time,
+            "first_order_hold",  # type: ignore
         )
         R_WB = So3TrajSegment.from_knot_points(knot_points.R_WBs, start_time, end_time)
 
@@ -273,9 +278,7 @@ class FaceContactTrajSegment(AbstractTrajSegment):
 
         sys = SliderPusherSystem(knot_points.contact_location, config)
 
-        mode = PlanarPushingContactMode.from_contact_location(
-            knot_points.contact_location
-        )
+        mode = PlanarPushingContactMode.from_contact_location(knot_points.contact_location)
 
         return cls(
             sys,
@@ -380,9 +383,7 @@ class NonCollisionTrajSegment(AbstractTrajSegment):
             end_time,
             "first_order_hold",
         )
-        p_BP = LinTrajSegment.from_knot_points(
-            np.hstack(knot_points.p_BPs), start_time, end_time, "bezier"
-        )
+        p_BP = LinTrajSegment.from_knot_points(np.hstack(knot_points.p_BPs), start_time, end_time, "bezier")
         R_WB = So3TrajSegment.from_knot_points(
             [knot_points.R_WB],  # just one value
             start_time,
@@ -561,9 +562,7 @@ class SimplePlanarPushingTrajectory(AbstractPlanarPushingTrajectory):
             cos_traj = [R[0, 0] for R in self.R_WBs]
             sin_traj = [R[1, 0] for R in self.R_WBs]
 
-            cos_int, sin_int = np.concatenate(
-                [np.interp([t], self.times, f) for f in [cos_traj, sin_traj]]
-            )
+            cos_int, sin_int = np.concatenate([np.interp([t], self.times, f) for f in [cos_traj, sin_traj]])
             R = np.array([[cos_int, -sin_int], [sin_int, cos_int]])
             return R
 
@@ -572,13 +571,9 @@ class SimplePlanarPushingTrajectory(AbstractPlanarPushingTrajectory):
         elif traj_to_get == "p_WP":
             traj = self.p_WPs
         else:
-            raise NotImplementedError(
-                f"Traj type {traj_to_get} is not implemented yet."
-            )
+            raise NotImplementedError(f"Traj type {traj_to_get} is not implemented yet.")
 
-        interpolated_values = np.concatenate(
-            [np.interp([t], self.times, f) for f in traj.T]
-        ).reshape((2, 1))
+        interpolated_values = np.concatenate([np.interp([t], self.times, f) for f in traj.T]).reshape((2, 1))
         return interpolated_values
 
     def get_knot_point_value(
@@ -651,9 +646,7 @@ class PlanarPushingTrajectory(AbstractPlanarPushingTrajectory):
             (
                 NonCollisionTrajSegment.from_knot_points(p, start, end)
                 if isinstance(p, NonCollisionVariables)
-                else FaceContactTrajSegment.from_knot_points(
-                    p, start, end, config.dynamics_config
-                )
+                else FaceContactTrajSegment.from_knot_points(p, start, end, config.dynamics_config)
             )
             for p, start, end in zip(path_knot_points, self.start_times, self.end_times)
         ]
@@ -678,16 +671,12 @@ class PlanarPushingTrajectory(AbstractPlanarPushingTrajectory):
         idx_of_curr_segment = np.where(t < self.end_times)[0][0]
         return idx_of_curr_segment
 
-    def get_traj_segment_for_time(
-        self, t: float
-    ) -> NonCollisionTrajSegment | FaceContactTrajSegment:
+    def get_traj_segment_for_time(self, t: float) -> NonCollisionTrajSegment | FaceContactTrajSegment:
         return self.traj_segments[self._get_curr_segment_idx(t)]
 
     def _t_or_end_time(self, t: float) -> float:
         if t > self.end_times[-1]:
-            return self.end_times[
-                -1
-            ]  # repeat last element when we want trajectory after end time
+            return self.end_times[-1]  # repeat last element when we want trajectory after end time
         elif t <= 0:
             return 0
         else:
@@ -696,9 +685,7 @@ class PlanarPushingTrajectory(AbstractPlanarPushingTrajectory):
     def get_knot_point_value(
         self,
         t: float,
-        traj_to_get: Literal[
-            "p_WB", "R_WB", "p_WP", "f_c_W", "p_BP", "c_n", "c_f", "theta"
-        ],
+        traj_to_get: Literal["p_WB", "R_WB", "p_WP", "f_c_W", "p_BP", "c_n", "c_f", "theta"],
     ) -> npt.NDArray[np.float64] | float:
         t = self._t_or_end_time(t)
         segment_idx = self._get_curr_segment_idx(t)
@@ -783,9 +770,7 @@ class PlanarPushingTrajectory(AbstractPlanarPushingTrajectory):
                 if t_idx == len(self.path_knot_points[segment_idx].normal_forces):
                     t_idx -= 1  # forces are inputs so they are zero order hold
                 if t_idx > len(self.path_knot_points[segment_idx].normal_forces):
-                    raise RuntimeError(
-                        "t_idx too high, this should not happen and is likely a bug"
-                    )
+                    raise RuntimeError("t_idx too high, this should not happen and is likely a bug")
                 c_n = self.path_knot_points[segment_idx].normal_forces[t_idx]  # type: ignore
                 return c_n
 
@@ -798,9 +783,7 @@ class PlanarPushingTrajectory(AbstractPlanarPushingTrajectory):
                 if t_idx == len(self.path_knot_points[segment_idx].normal_forces):
                     t_idx -= 1  # forces are inputs so they are zero order hold
                 if t_idx > len(self.path_knot_points[segment_idx].normal_forces):
-                    raise RuntimeError(
-                        "t_idx too high, this should not happen and is likely a bug"
-                    )
+                    raise RuntimeError("t_idx too high, this should not happen and is likely a bug")
                 c_f = self.path_knot_points[segment_idx].friction_forces[t_idx]  # type: ignore
                 return c_f
 
@@ -899,6 +882,30 @@ class PlanarPushingTrajectory(AbstractPlanarPushingTrajectory):
 
         planar_pose = PlanarPose(p_WP[0, 0], p_WP[1, 0], theta=0)
         return planar_pose
+
+    def get_slider_velocity(self, t) -> npt.NDArray[np.float64]:
+        seg = self.get_traj_segment_for_time(t)
+        if isinstance(seg, NonCollisionTrajSegment):  # zero velocity if not in contact with pusher
+            v_WB = np.zeros(2)
+            theta_dot = 0.0
+        else:
+            v_WB = seg.get_v_WB(t).flatten()
+            theta_dot = seg.R_WB.eval_theta_dot(t)
+
+        return np.array([v_WB[0], v_WB[1], theta_dot])
+
+    def get_pusher_velocity(self, t) -> npt.NDArray[np.float64]:
+        seg = self.get_traj_segment_for_time(t)
+        if isinstance(seg, NonCollisionTrajSegment):
+            v_body = seg.p_BP.traj.EvalDerivative(t)
+            R_WB = seg.get_R_WB(t)[:2, :2]
+            v_world = R_WB @ v_body
+            return v_world.flatten()
+        else:
+            state = seg.eval_state(t)
+            control = seg.eval_control(t)
+            v_WB = seg.get_v_WB(t)
+            return seg.sys.get_pusher_velocity(state, control, v_WB).flatten()
 
     def save(self, filename: str) -> None:
         with open(Path(filename), "wb") as file:

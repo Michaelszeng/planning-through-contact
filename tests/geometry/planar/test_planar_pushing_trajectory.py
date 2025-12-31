@@ -45,9 +45,7 @@ def _pose_is_close(pose1: PlanarPose, pose2: PlanarPose, tol=1e-6) -> bool:
     ],
     ids=["translation", "rotation"],
 )
-def test_planar_pushing_trajectory_values(
-    initial_pose: PlanarPose, final_pose: PlanarPose
-) -> None:
+def test_planar_pushing_trajectory_values(initial_pose: PlanarPose, final_pose: PlanarPose) -> None:
     # Create test objects
     box_geometry = Box2d(width=0.3, height=0.3)
     pusher_radius = 0.05
@@ -87,9 +85,7 @@ def test_planar_pushing_trajectory_values(
     traj = PlanarPushingTrajectory(plan_cfg, [vars])
 
     if DEBUG:
-        visualize_planar_pushing_trajectory(
-            traj, visualize_knot_points=True, save=True, filename="debug_file"
-        )
+        visualize_planar_pushing_trajectory(traj, visualize_knot_points=True, save=True, filename="debug_file")
         # (num_knot_points, 2): first col cosines, second col sines
         rs = np.vstack([R_WB[:, 0] for R_WB in traj.path_knot_points[0].R_WBs])  # type: ignore
         plot_cos_sine_trajs(rs)
@@ -113,6 +109,13 @@ def test_planar_pushing_trajectory_values(
 
         pusher_pos_from_state = sys.get_p_WP_from_state(state)
         assert np.allclose(pusher_pose_from_traj.pos(), pusher_pos_from_state)
+
+        # Check velocities
+        v_pusher = traj.get_pusher_velocity(t)
+        assert v_pusher.shape == (2,)
+
+        v_slider = traj.get_slider_velocity(t)
+        assert v_slider.shape == (3,)
 
         # TODO: control too!
 
