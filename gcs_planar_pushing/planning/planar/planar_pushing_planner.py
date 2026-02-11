@@ -250,6 +250,12 @@ class PlanarPushingPlanner:
             self.source_subgraph.set_initial_poses(pusher_pose, slider_pose, collision_free_region)
             self.source = self.source_subgraph.source
 
+        if self.source:
+            # Warn if source vertex is disconnected from graph
+            outgoing_edges = [e for e in self.gcs.Edges() if e.u() == self.source.vertex]
+            if len(outgoing_edges) == 0:
+                print(f"WARNING: Source vertex '{self.source.vertex.name()}' disconnected from graph!")
+
     def _set_target_poses(
         self,
         pusher_pose: PlanarPose,

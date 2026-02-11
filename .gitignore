@@ -4,6 +4,7 @@ trajectories/
 trajectories_mpc/
 outputs/
 multirun/
+*.pkl
 
 # Vim
 *.swp

@@ -147,6 +147,15 @@ class NonCollisionCost:
 
 
 @dataclass
+class NonCollisionConfig:
+    continuity_on_pusher_velocity: bool = False
+
+    def __str__(self) -> str:
+        field_strings = [f"{field.name}: {getattr(self, field.name)}" for field in fields(self)]
+        return "\n".join(field_strings)
+
+
+@dataclass
 class ContactCost:
     keypoint_arc_length: Optional[float] = None
     force_regularization: Optional[float] = None
@@ -210,7 +219,6 @@ class PlanarPlanConfig:
     time_in_contact: float = 2
     time_non_collision: float = 0.5
     time_first_mode: Optional[float] = None  # Used for MPC, when the mode sequence is fixed
-    continuity_on_pusher_velocity: bool = False  # TODO: Move this into a NonCollisionConfig
     allow_teleportation: bool = False
     use_eq_elimination: bool = False  # TODO: Remove
     use_entry_and_exit_subgraphs: bool = True
@@ -220,6 +228,7 @@ class PlanarPlanConfig:
     use_band_sparsity: bool = True
     # TODO(bernhardpg): Refactor these cost terms into a struct
     non_collision_cost: NonCollisionCost = field(default_factory=lambda: NonCollisionCost())
+    non_collision_config: NonCollisionConfig = field(default_factory=lambda: NonCollisionConfig())
     contact_config: ContactConfig = field(default_factory=lambda: ContactConfig())
     use_approx_exponential_map: bool = False
 

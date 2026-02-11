@@ -403,7 +403,7 @@ def test_subgraph_planning_t_pusher(plan_config: PlanarPlanConfig, avoid_object:
     if avoid_object:
         plan_config.non_collision_cost.distance_to_object = 1.0
 
-    plan_config.continuity_on_pusher_velocity = False
+    plan_config.non_collision_config.continuity_on_pusher_velocity = False
 
     plan_config.num_knot_points_non_collision = 5
     plan_config.dynamics_config.slider = RigidBody("T", TPusher2d(), mass=0.2)

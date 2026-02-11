@@ -22,6 +22,7 @@ from gcs_planar_pushing.planning.planar.planar_plan_config import (
     BoxWorkspace,
     ContactConfig,
     ContactCost,
+    NonCollisionConfig,
     NonCollisionCost,
     PlanarPlanConfig,
     PlanarPushingStartAndGoal,
@@ -210,10 +211,10 @@ def get_default_plan_config(
         contact_config = ContactConfig(cost=contact_cost, lam_min=buffer_to_corners, lam_max=1 - buffer_to_corners)
 
         time_contact = 3.0
-        time_non_collision = 2.0
+        time_non_collision = 1.5
 
-        num_knot_points_non_collision = 3
-        num_knot_points_contact = 3
+        num_knot_points_non_collision = 5
+        num_knot_points_contact = 4
 
     elif use_case == "demo":
         slider_pusher_config = SliderPusherSystemConfig(
@@ -260,7 +261,7 @@ def get_default_plan_config(
         use_band_sparsity=True,
         contact_config=contact_config,
         non_collision_cost=non_collision_cost,
-        continuity_on_pusher_velocity=True,
+        non_collision_config=NonCollisionConfig(continuity_on_pusher_velocity=True),
         allow_teleportation=False,
         time_in_contact=time_contact,
         time_non_collision=time_non_collision,

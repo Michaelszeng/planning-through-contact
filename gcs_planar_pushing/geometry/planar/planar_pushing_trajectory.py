@@ -3,11 +3,13 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
-from typing import List, Literal, Optional, Tuple
+from typing import List, Literal, Optional, Tuple, cast
 
+import matplotlib.pyplot as plt
 import numpy as np
 import numpy.typing as npt
 import pydrake.geometry.optimization as opt
+from matplotlib.axes import Axes
 from pydrake.math import RotationMatrix
 from pydrake.trajectories import (
     BezierCurve,
@@ -926,3 +928,77 @@ class PlanarPushingTrajectory(AbstractPlanarPushingTrajectory):
     @property
     def end_time(self) -> float:
         return self.traj_segments[-1].end_time
+
+    def plot_velocity_profile(
+        self,
+        target: Literal["slider", "pusher"] = "pusher",
+        num_samples: int = 1000,
+        ax: Optional[Axes] = None,
+        show_plot: bool = False,
+        save_plot: Optional[str] = None,
+    ) -> Axes:
+        """
+        Plot velocity magnitude profile over time for the slider or pusher.
+
+        Args:
+            target: Which object to plot velocity for - "slider" or "pusher"
+            num_samples: Number of time samples to use for plotting
+            ax: Optional matplotlib axes to plot on. If None, creates a new figure
+            show_plot: Whether to call plt.show() at the end
+
+        Returns:
+            The matplotlib axes object with the plot
+        """
+        # Create time samples
+        times = np.linspace(self.start_time, self.end_time, num_samples)
+        velocities = []
+
+        # Sample velocities at each time point
+        for t in times:
+            if target == "slider":
+                vel = self.get_slider_velocity(t)
+            elif target == "pusher":
+                vel = self.get_pusher_velocity(t)
+            else:
+                raise ValueError(f"Invalid target: {target}. Must be 'slider' or 'pusher'")
+
+            # Calculate velocity magnitude (only translational components)
+            vel_magnitude = np.linalg.norm(vel[:2])
+            velocities.append(vel_magnitude)
+
+        # Create plot
+        created_new_fig = ax is None
+        if ax is None:
+            fig, ax_new = plt.subplots(figsize=(8, 6), dpi=80)
+            ax = cast(Axes, ax_new)
+        else:
+            fig = ax.figure
+
+        ax.plot(times, velocities, linewidth=2)
+
+        # Add vertical lines for mode switches
+        for switch_time in self.end_times[:-1]:
+            ax.axvline(x=switch_time, color="k", linestyle="--", alpha=0.5, linewidth=1)
+
+        ax.set_xlabel("Time (s)", fontsize=12)
+        ax.set_ylabel("Velocity Magnitude (m/s)", fontsize=12)
+        title = f"{target.capitalize()} Velocity Profile (press any key to close)"
+        ax.set_title(title, fontsize=14)
+        ax.grid(True, alpha=0.3)
+
+        if show_plot:
+            if created_new_fig:
+                # Add key press event handler to close the figure
+                def on_key(event):
+                    plt.close(fig)
+
+                fig.canvas.mpl_connect("key_press_event", on_key)
+
+            plt.tight_layout()
+            plt.show()
+
+        if save_plot is not None:
+            fig.savefig(save_plot + ".png", format="png")
+            plt.close()
+
+        return ax

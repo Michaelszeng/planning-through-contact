@@ -163,7 +163,7 @@ def subgraph(
     else:
         plan_config.non_collision_cost.distance_to_object_socp = None
 
-    plan_config.continuity_on_pusher_velocity = request.param.get(
+    plan_config.non_collision_config.continuity_on_pusher_velocity = request.param.get(
         "pusher_velocity_continuity", False
     )
 
@@ -214,7 +214,7 @@ def planner(
 
     plan_config.allow_teleportation = request.param.get("allow_teleportation", False)
     plan_config.use_eq_elimination = request.param.get("use_eq_elimination", False)
-    plan_config.continuity_on_pusher_velocity = request.param.get(
+    plan_config.non_collision_config.continuity_on_pusher_velocity = request.param.get(
         "pusher_velocity_continuity", False
     )
 

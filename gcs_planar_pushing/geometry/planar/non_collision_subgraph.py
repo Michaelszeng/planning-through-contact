@@ -105,27 +105,27 @@ class NonCollisionSubGraph:
                         gcs,
                         VertexModePair(non_collision_vertices[i], non_collision_modes[i]),
                         VertexModePair(non_collision_vertices[j], non_collision_modes[j]),
-                        continuity_on_pusher_velocities=config.continuity_on_pusher_velocity,
+                        continuity_on_pusher_velocities=config.non_collision_config.continuity_on_pusher_velocity,
                     )
                 else:
                     gcs_add_edge_with_continuity(
                         gcs,
                         VertexModePair(non_collision_vertices[j], non_collision_modes[j]),
                         VertexModePair(non_collision_vertices[i], non_collision_modes[i]),
-                        continuity_on_pusher_velocities=config.continuity_on_pusher_velocity,
+                        continuity_on_pusher_velocities=config.non_collision_config.continuity_on_pusher_velocity,
                     )
             else:
                 gcs_add_edge_with_continuity(
                     gcs,
                     VertexModePair(non_collision_vertices[i], non_collision_modes[i]),
                     VertexModePair(non_collision_vertices[j], non_collision_modes[j]),
-                    continuity_on_pusher_velocities=config.continuity_on_pusher_velocity,
+                    continuity_on_pusher_velocities=config.non_collision_config.continuity_on_pusher_velocity,
                 )
                 gcs_add_edge_with_continuity(
                     gcs,
                     VertexModePair(non_collision_vertices[j], non_collision_modes[j]),
                     VertexModePair(non_collision_vertices[i], non_collision_modes[i]),
-                    continuity_on_pusher_velocities=config.continuity_on_pusher_velocity,
+                    continuity_on_pusher_velocities=config.non_collision_config.continuity_on_pusher_velocity,
                 )
 
         return cls(
