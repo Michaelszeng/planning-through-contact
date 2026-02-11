@@ -281,7 +281,7 @@ class PlanarPushingMPC:
         current_slider_pose: PlanarPose,
         current_pusher_pose: PlanarPose,
         mode_sequence: List[str],
-        current_pusher_velocity: npt.NDArray[np.float64],
+        current_pusher_velocity: Optional[npt.NDArray[np.float64]],
         collision_free_region: Optional[PolytopeContactLocation] = None,
     ) -> None:
         # Update config
@@ -380,8 +380,8 @@ class PlanarPushingMPC:
 
                             order = decision_vars.num_knot_points - 1
                             scale = decision_vars.time_in_mode / order
-                            # new_mode.prog.AddLinearEqualityConstraint(c1_x - c0_x == v_body[0] * scale)
-                            # new_mode.prog.AddLinearEqualityConstraint(c1_y - c0_y == v_body[1] * scale)
+                            new_mode.prog.AddLinearEqualityConstraint(c1_x - c0_x == v_body[0] * scale)
+                            new_mode.prog.AddLinearEqualityConstraint(c1_y - c0_y == v_body[1] * scale)
                             # vel_tol = 1e-1  # tolerance
                             # c_tol = vel_tol * scale
                             # new_mode.prog.AddLinearConstraint(c1_x - c0_x <= v_body[0] * scale + c_tol)
@@ -460,7 +460,7 @@ class PlanarPushingMPC:
         t: float,
         current_slider_pose: PlanarPose,
         current_pusher_pose: PlanarPose,
-        current_pusher_velocity: npt.NDArray[np.float64],
+        current_pusher_velocity: Optional[npt.NDArray[np.float64]],
         output_folder: str = "",
         output_name: str = "",
         save_video: bool = False,
