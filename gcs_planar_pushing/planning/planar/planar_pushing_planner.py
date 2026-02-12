@@ -483,7 +483,7 @@ class PlanarPushingPlanner:
             assert gcs_result.is_success()
 
         if not gcs_result.is_success():
-            print("WARNING: Solver did not find a solution!")
+            print("*" * 60 + "\nWARNING: Solver did not find a solution!\n" + "*" * 60)
             return None
 
         if solver_params.measure_solve_time:
@@ -546,17 +546,6 @@ class PlanarPushingPlanner:
         path = paths[best_idx]
         return path
 
-    def _pick_best_path_with_fixed_mode_sequence(self, paths: List[PlanarPushingPath]) -> PlanarPushingPath:
-        """
-        Picks the best path from a list of paths based on the non-rounded cost
-        (no rounding necessary since mode sequence is fixed, i.e. solution is
-        already feasible and optimal).
-        """
-        rounded_costs = [p.result.get_optimal_cost() for p in paths]
-        best_idx = np.argmin(rounded_costs)
-        path = paths[best_idx]
-        return path
-
     def plan_path(
         self, solver_params: PlanarSolverParams, active_vertices: Optional[List[str]] = None, store_result: bool = True
     ) -> Optional[PlanarPushingPath]:
@@ -565,13 +554,12 @@ class PlanarPushingPlanner:
         if paths is None:
             return None
 
-        if active_vertices is None:
-            feasible_paths = self._get_rounded_paths(solver_params, paths)
-            if feasible_paths is None:
-                return None
-            self.path = self._pick_best_path(feasible_paths)
-        else:
-            self.path = self._pick_best_path_with_fixed_mode_sequence(paths)
+        # Perform rounding to get feasible paths
+        feasible_paths = self._get_rounded_paths(solver_params, paths)
+        if feasible_paths is None:
+            print("*" * 60 + "\nWARNING: Rounding returned no feasible paths!\n" + "*" * 60)
+            return None
+        self.path = feasible_paths[0] if active_vertices is None else self._pick_best_path(feasible_paths)
 
         if solver_params.print_path:
             print(f"path: {self.path.get_path_names()}")

@@ -998,7 +998,9 @@ class PlanarPushingTrajectory(AbstractPlanarPushingTrajectory):
             plt.show()
 
         if save_plot is not None:
-            fig.savefig(save_plot + ".png", format="png")
+            save_path = Path(save_plot + ".png")
+            save_path.parent.mkdir(parents=True, exist_ok=True)
+            fig.savefig(save_path, format="png")
             plt.close()
 
         return ax

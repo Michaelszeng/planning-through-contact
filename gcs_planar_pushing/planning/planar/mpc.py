@@ -86,7 +86,7 @@ class PlanarPushingMPC:
         slider_pose: PlanarPose,
         pusher_pose: PlanarPose,
         mode: AbstractContactMode,
-        tol: float = 1e-6,
+        tol: float = 1e-10,
     ) -> bool:
         """
         Checks if the given state is valid for the given mode.
@@ -439,21 +439,25 @@ class PlanarPushingMPC:
                         mode_sequence[1] = new_mode.name
                         return
 
-    def _update_mode_timing(self, t: float) -> None:
+    def _update_mode_timing(self, t: float, segment_idx: int) -> None:
+        """self.config.time_first_mode equal to the remaining time in the current mode"""
         traj = self.original_traj
 
-        # Find current segment
         # If t > end_time, we are done / last segment
         if t >= traj.end_time:
             self.config.time_first_mode = 0.0
             return
 
-        idx = np.where(t < traj.end_times)[0][0]
-        end_time = traj.end_times[idx]
+        end_time = traj.end_times[segment_idx]
         remaining = end_time - t
 
         # Ensure a small positive minimum to avoid numerical issues
-        self.config.time_first_mode = max(remaining, 1e-3)
+        self.config.time_first_mode = max(remaining, 1e-1)
+
+        # If we are very close to the end of the mode, we might want to just skip to the next mode
+        # This is a heuristic to avoid planning for very short durations
+        if remaining < 1e-1:
+            print(f"WARNING: Remaining time {remaining:.4f} < 0.1s. Increasing to 0.1s to avoid numerical issues.")
 
     def plan(
         self,
@@ -498,7 +502,7 @@ class PlanarPushingMPC:
         mode_sequence = self._get_remaining_mode_sequence(segment_idx=segment_idx)
         print(f"    Mode sequence: {mode_sequence}")
 
-        self._update_mode_timing(t)
+        self._update_mode_timing(t, segment_idx)
         print(f"    Remaining time in current mode: {self.config.time_first_mode}")
 
         self._update_initial_poses(
@@ -513,15 +517,12 @@ class PlanarPushingMPC:
 
         # Save outputs if requested
         if path is not None and (save_video or save_traj) and output_folder:
-            folder_name = f"{output_folder}/{output_name}" if output_name else output_folder
-            os.makedirs(folder_name, exist_ok=True)
+            os.makedirs(output_folder, exist_ok=True)
 
-            traj = path.to_traj(
-                rounded=False
-            )  # Do not round; with fixed mode sequence, soln. is already feasible and optimal
+            traj = path.to_traj(rounded=True)
 
             if save_traj:
-                trajectory_folder = f"{folder_name}/trajectory"
+                trajectory_folder = f"{output_folder}/{output_name}/trajectory"
                 os.makedirs(trajectory_folder, exist_ok=True)
 
                 if traj is not None:
@@ -558,11 +559,11 @@ class PlanarPushingMPC:
                     visualize_planar_pushing_trajectory(
                         traj,
                         save=True,
-                        filename=f"{folder_name}/traj",
+                        filename=f"{output_folder}/{output_name}",
                         visualize_knot_points=not interpolate_video,
                         lims=animation_lims,
                         overlay_trajs=overlay_trajs_arg,
                     )
-                    print(f"Saved video to {folder_name}")
+                    print(f"Saved video to {output_folder}")
 
         return path

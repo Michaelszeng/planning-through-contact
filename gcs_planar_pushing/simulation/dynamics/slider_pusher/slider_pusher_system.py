@@ -49,21 +49,15 @@ def SliderPusherSystem_(T):
             (
                 self.pv1,
                 self.pv2,
-            ) = self.slider_geometry.get_proximate_vertices_from_location(
-                contact_location
-            )
+            ) = self.slider_geometry.get_proximate_vertices_from_location(contact_location)
             (
                 self.normal_vec,
                 self.tangent_vec,
-            ) = self.slider_geometry.get_norm_and_tang_vecs_from_location(
-                contact_location
-            )
+            ) = self.slider_geometry.get_norm_and_tang_vecs_from_location(contact_location)
 
             NUM_CONTACT_POINTS = 1
             NUM_SLIDER_STATES = 3  # x, y, theta
-            state_index = self.DeclareContinuousState(
-                NUM_SLIDER_STATES + NUM_CONTACT_POINTS
-            )  # x, y, theta, lam
+            state_index = self.DeclareContinuousState(NUM_SLIDER_STATES + NUM_CONTACT_POINTS)  # x, y, theta, lam
             self.output = self.DeclareStateOutputPort("y", state_index)  # y = x
 
             NUM_INPUTS = 3  # f_n, f_t, lam_dot
@@ -82,9 +76,7 @@ def SliderPusherSystem_(T):
             )
 
         def _get_p_BP(self, lam: float) -> npt.NDArray[np.float64]:
-            p_BP = self.slider_geometry.get_p_BP_from_lam(
-                lam, self.contact_location, radius=self.pusher_radius
-            )
+            p_BP = self.slider_geometry.get_p_BP_from_lam(lam, self.contact_location, radius=self.pusher_radius)
             return p_BP
 
         def _get_p_Bc(self, lam: float) -> npt.NDArray[np.float64]:
@@ -102,13 +94,9 @@ def SliderPusherSystem_(T):
             return J_p
 
         def _get_contact_force(self, c_n: float, c_f: float) -> npt.NDArray[np.float64]:
-            return self.config.force_scale * (
-                self.normal_vec * c_n + self.tangent_vec * c_f
-            )
+            return self.config.force_scale * (self.normal_vec * c_n + self.tangent_vec * c_f)
 
-        def _get_wrench(
-            self, lam: float, c_n: float, c_f: float
-        ) -> npt.NDArray[np.float64]:
+        def _get_wrench(self, lam: float, c_n: float, c_f: float) -> npt.NDArray[np.float64]:
             f_c_B = self._get_contact_force(c_n, c_f)
             J_c = self._get_contact_jacobian(lam)
             w = J_c.T.dot(f_c_B)
@@ -124,9 +112,7 @@ def SliderPusherSystem_(T):
             return self.D.dot(w)
 
         def _get_R(self, theta: float) -> npt.NDArray[np.float64]:
-            R = np.array(
-                [[cos(theta), -sin(theta), 0], [sin(theta), cos(theta), 0], [0, 0, 1]]
-            )
+            R = np.array([[cos(theta), -sin(theta), 0], [sin(theta), cos(theta), 0], [0, 0, 1]])
             return R
 
         def get_state_from_planar_poses_by_projection(
@@ -145,13 +131,9 @@ def SliderPusherSystem_(T):
             p_WP = pusher_pose.pos()
             p_WB = slider_pose.pos()
             p_BP = R_WB.T.dot(p_WP - p_WB)
-            projected_lam = self.slider_geometry.get_lam_from_p_BP_by_projection(
-                p_BP, self.contact_location
-            )
+            projected_lam = self.slider_geometry.get_lam_from_p_BP_by_projection(p_BP, self.contact_location)
 
-            state = np.array(
-                [slider_pose.x, slider_pose.y, slider_pose.theta, projected_lam]
-            )
+            state = np.array([slider_pose.x, slider_pose.y, slider_pose.theta, projected_lam])
             return state
 
         def get_p_WP_from_state(
@@ -202,16 +184,12 @@ def SliderPusherSystem_(T):
             R_WB = two_d_rotation_matrix_from_angle(slider_pose.theta)
 
             f_c_B = R_WB.T.dot(f_c_W)
-            c_n, c_f = self.slider_geometry.get_force_comps_from_f_c_B(
-                f_c_B, self.contact_location
-            )
+            c_n, c_f = self.slider_geometry.get_force_comps_from_f_c_B(f_c_B, self.contact_location)
 
             control = np.array([c_n, c_f, lam_dot])
             return control
 
-        def calc_dynamics(
-            self, x: npt.NDArray[np.float64], u: npt.NDArray[np.float64]
-        ) -> npt.NDArray[np.float64]:
+        def calc_dynamics(self, x: npt.NDArray[np.float64], u: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
             theta = x[2]
             lam = x[3]
 
@@ -226,9 +204,7 @@ def SliderPusherSystem_(T):
             x_dot = np.vstack((R.dot(t), [lam_dot]))
             return x_dot
 
-        def DoCalcTimeDerivatives(
-            self, context: Context, derivatives: ContinuousState
-        ) -> None:
+        def DoCalcTimeDerivatives(self, context: Context, derivatives: ContinuousState) -> None:
             x = context.get_continuous_state_vector()
             u = self.input.Eval(context)
             x_dot = self.calc_dynamics(x, u)  # type: ignore
@@ -273,13 +249,9 @@ def SliderPusherSystem_(T):
             v_BP_W = R_WB.dot(v_BP_B)
 
             w_WB_W = np.array([0, 0, t[2, 0]])
-            p_BP_B = self.slider_geometry.get_p_BP_from_lam(
-                lam, self.contact_location, self.pusher_radius
-            )
+            p_BP_B = self.slider_geometry.get_p_BP_from_lam(lam, self.contact_location, self.pusher_radius)
             p_BP_W = R_WB.dot(p_BP_B)
-            v_WP_W = (
-                v_WB_W + v_BP_W + np.cross(w_WB_W, p_BP_W.flatten())[:2].reshape((2, 1))
-            )
+            v_WP_W = v_WB_W + v_BP_W + np.cross(w_WB_W, p_BP_W.flatten())[:2].reshape((2, 1))
 
             return v_WP_W
 
@@ -307,9 +279,7 @@ def SliderPusherSystem_(T):
             w_WB_W = np.array([0, 0, t[2, 0]])
             p_Bc_B = self.slider_geometry.get_p_Bc_from_lam(lam, self.contact_location)
             p_Bc_W = R_WB.dot(p_Bc_B)
-            v_Wc = (
-                v_WB_W + v_Bc_W + np.cross(w_WB_W, p_Bc_W.flatten())[:2].reshape((2, 1))
-            )
+            v_Wc = v_WB_W + v_Bc_W + np.cross(w_WB_W, p_Bc_W.flatten())[:2].reshape((2, 1))
             return v_Wc
 
     return Impl

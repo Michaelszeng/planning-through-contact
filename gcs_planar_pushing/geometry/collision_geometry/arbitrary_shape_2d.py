@@ -521,7 +521,7 @@ class ArbitraryShape2D(CollisionGeometry):
         if self.com is not None:
             return np.array([self.com[0], self.com[1]]).reshape((2, 1))
         # Compute the center of mass from uniform density
-        logging.warning("COM not provided. Computing from uniform density.")
+        logging.info("COM not provided. Computing from uniform density.")
         x_com, y_com = compute_com_from_uniform_density(boxes)
         return np.array([x_com, y_com]).reshape((2, 1))
 

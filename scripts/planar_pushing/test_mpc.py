@@ -11,7 +11,9 @@ from gcs_planar_pushing.geometry.planar.planar_pose import PlanarPose
 from gcs_planar_pushing.planning.planar.mpc import PlanarPushingMPC
 from gcs_planar_pushing.planning.planar.planar_plan_config import PlanarPushingStartAndGoal
 
-solver_params = get_default_solver_params()
+solver_params = get_default_solver_params(debug=True)
+# solver_params.save_solver_output = True
+# solver_params.print_solver_output = True
 
 slider_type = "arbitrary"
 arbitrary_shape_pickle_path = "arbitrary_shape_pickles/small_t_pusher.pkl"
@@ -34,7 +36,7 @@ start_and_goal = PlanarPushingStartAndGoal(
     pusher_target_pose=pusher_target_pose,
 )
 
-t = 2.01
+t = 3
 
 print("Constructing MPC Planner...")
 
@@ -63,6 +65,12 @@ print("Planning with MPC...")
 current_slider_pose = mpc.original_traj.get_slider_planar_pose(t)
 current_pusher_pose = mpc.original_traj.get_pusher_planar_pose(t)
 current_pusher_velocity = mpc.original_traj.get_pusher_velocity(t)
+print(f"current_pusher_velocity: {current_pusher_velocity}")
+
+pos = current_pusher_pose.pos()
+theta = current_pusher_pose.theta
+current_pusher_pose = PlanarPose(pos[0, 0] + 0.01, pos[1, 0], theta)  # Try an augmentation
+current_pusher_velocity = current_pusher_velocity * 1.05
 
 # current_slider_pose = PlanarPose(0.4991755125699597, -0.03995089541666773, 3.0110513740188143)
 # current_pusher_pose = PlanarPose(0.5861310676117617, 0.1495927046771189, 0.00010802307327750782)
