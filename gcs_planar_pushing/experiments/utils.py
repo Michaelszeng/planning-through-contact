@@ -201,20 +201,20 @@ def get_default_plan_config(
         slider_pusher_config = SliderPusherSystemConfig(
             slider=slider,
             pusher_radius=pusher_radius,
-            friction_coeff_slider_pusher=0.2,  # Slider uses mu=0.5, pusher uses mu=0.25
+            friction_coeff_slider_pusher=0.1,  # Slider uses mu=0.5, pusher uses mu=0.25
             friction_coeff_table_slider=0.5,
-            integration_constant=0.3,
+            integration_constant=0.24,
         )
         contact_cost = get_default_contact_cost()
         non_collision_cost = get_default_non_collision_cost()
-        buffer_to_corners = 0.0
+        buffer_to_corners = 0.003
         contact_config = ContactConfig(cost=contact_cost, lam_min=buffer_to_corners, lam_max=1 - buffer_to_corners)
 
         time_contact = 4.0
-        time_non_collision = 1.5
+        time_non_collision = 2.0
 
-        num_knot_points_non_collision = 5
-        num_knot_points_contact = 4
+        num_knot_points_non_collision = 3
+        num_knot_points_contact = 3
 
     elif use_case == "demo":
         slider_pusher_config = SliderPusherSystemConfig(

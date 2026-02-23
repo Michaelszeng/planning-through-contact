@@ -14,7 +14,7 @@ slider_target_pose = PlanarPose(0.0, 0.0, 0.0)
 pusher_target_pose = PlanarPose(-0.3, 0, 0)
 
 config = get_default_plan_config(
-    slider_type=slider_type, arbitrary_shape_pickle_path=arbitrary_shape_pickle_path, use_case="normal"
+    slider_type=slider_type, arbitrary_shape_pickle_path=arbitrary_shape_pickle_path, use_case="drake_iiwa"
 )
 start_and_goal = PlanarPushingStartAndGoal(
     slider_initial_pose=slider_initial_pose,

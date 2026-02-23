@@ -555,7 +555,11 @@ class PlanarPushingPlanner:
         return path
 
     def plan_path(
-        self, solver_params: PlanarSolverParams, active_vertices: Optional[List[str]] = None, store_result: bool = True
+        self,
+        solver_params: PlanarSolverParams,
+        active_vertices: Optional[List[str]] = None,
+        store_result: bool = True,
+        rounded: bool = True,
     ) -> Optional[PlanarPushingPath]:
         start = time.time()
         paths = self._plan_paths(solver_params, active_vertices, store_result=store_result)
@@ -565,13 +569,18 @@ class PlanarPushingPlanner:
             return None
 
         # Perform rounding to get feasible paths
+        # Note: even if rounded is False, we still compute the rounded path and save it for plotting/debugging
         start = time.time()
         feasible_paths = self._get_rounded_paths(solver_params, paths)
-        print(f"    =====================================> _get_rounded_paths time: {time.time() - start}")
-        if feasible_paths is None:
-            print("*" * 60 + "\nWARNING: Rounding returned no feasible paths!\n" + "*" * 60)
-            return None
-        self.path = feasible_paths[0] if active_vertices is None else self._pick_best_path(feasible_paths)
+
+        if rounded:
+            print(f"    =====================================> _get_rounded_paths time: {time.time() - start}")
+            if feasible_paths is None:
+                print("*" * 60 + "\nWARNING: Rounding returned no feasible paths!\n" + "*" * 60)
+                return None
+            self.path = feasible_paths[0] if active_vertices is None else self._pick_best_path(feasible_paths)
+        else:
+            self.path = paths[0]
 
         if solver_params.print_path:
             print(f"path: {self.path.get_path_names()}")

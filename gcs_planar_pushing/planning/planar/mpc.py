@@ -158,11 +158,40 @@ class PlanarPushingMPC:
         else:
             candidates = list(range(len(self.original_path.pairs)))  # All modes are candidates
 
-        # If there is contact, then we expect only one candidate mode
+        # If there is contact
         if is_in_contact:
-            valid_indices = [i for i in candidates if isinstance(self.original_path.pairs[i].mode, FaceContactMode)]
-            assert len(valid_indices) == 1, f"Expected one candidate mode when in contact, but got {len(valid_indices)}"
-            segment_idx = valid_indices[0]
+            current_mode = self.original_path.pairs[self.current_segment_index].mode
+            # If we are currently in a non-collision mode:
+            if isinstance(current_mode, NonCollisionMode):
+                next_idx = self.current_segment_index + 1
+                # Either, we are transitioning into a contact mode:
+                if next_idx in candidates and isinstance(self.original_path.pairs[next_idx].mode, FaceContactMode):
+                    segment_idx = next_idx
+                # Or, we have just forced a transitioned out of a contact mode and are now in a non-collision mode, but
+                # there is still residual contact. We stay in the current non-collision mode.
+                else:
+                    segment_idx = self.current_segment_index
+            # If we are currently in a contact mode:
+            elif isinstance(current_mode, FaceContactMode):
+                remaining_time = self._get_remaining_time_in_current_mode(t)
+                next_idx = self.current_segment_index + 1
+
+                # If there is no time left in the contact mode, force a transition to the next mode
+                if (
+                    remaining_time <= 1e-3
+                    and next_idx in candidates
+                    and isinstance(self.original_path.pairs[next_idx].mode, NonCollisionMode)
+                ):
+                    segment_idx = next_idx
+                # Otherwise, continue in the contact mode.
+                else:
+                    valid_indices = [
+                        i for i in candidates if isinstance(self.original_path.pairs[i].mode, FaceContactMode)
+                    ]
+                    assert len(valid_indices) == 1, (
+                        f"Expected one candidate mode when in contact, but got {len(valid_indices)}"
+                    )
+                    segment_idx = valid_indices[0]
         # If there is no contact, there could be one or two (if there are two consecutive non-collision modes) candidate
         # modes. We need to do an actual check based on the system state.
         else:
@@ -434,10 +463,6 @@ class PlanarPushingMPC:
                             original_mode.contact_location,
                             self.config,
                         )
-                        # # Relax rounding tolerance for MPC to handle small numerical errors
-                        # self.solver_params.nonl_round_major_feas_tol = 1e-3
-                        # self.solver_params.nonl_round_minor_feas_tol = 1e-3
-                        # self.solver_params.nonl_round_opt_tol = 1e-3
                     elif isinstance(original_mode, NonCollisionMode):
                         new_mode = NonCollisionMode(
                             f"{first_mode_name}_SHORT",
@@ -446,9 +471,6 @@ class PlanarPushingMPC:
                             original_mode.contact_location,
                             self.config,
                         )
-                        # self.solver_params.nonl_round_major_feas_tol = 1e-5
-                        # self.solver_params.nonl_round_minor_feas_tol = 1e-5
-                        # self.solver_params.nonl_round_opt_tol = 1e-5
 
                     if new_mode is not None:
                         # Enforce initial velocity constraint if applicable
@@ -531,23 +553,22 @@ class PlanarPushingMPC:
                         mode_sequence[1] = new_mode.name
                         return
 
-    def _update_mode_timing(self, t: float, segment_idx: int) -> None:
-        """self.config.time_first_mode equal to the remaining time in the current mode"""
+    def _get_remaining_time_in_current_mode(self, t: float) -> float:
+        """
+        Gets the remaining time in the current mode.
+        """
         traj = self.original_traj
-
-        # If t > end_time, we are done / last segment
-        if t >= traj.end_time:
-            self.config.time_first_mode = 0.0
-            return
-
-        end_time = traj.end_times[segment_idx]
+        end_time = traj.end_times[self.current_segment_index]
         remaining = end_time - t
+        return remaining
 
-        # Ensure a small positive minimum to avoid numerical issues
+    def _update_mode_timing(self, t: float, segment_idx: int) -> None:
+        """
+        Updates the timing of the first mode in the mode sequence.
+        self.config.time_first_mode is set to the remaining time in the current mode.
+        """
+        remaining = self._get_remaining_time_in_current_mode(t)
         self.config.time_first_mode = max(remaining, 1e-1)
-
-        # If we are very close to the end of the mode, we might want to just skip to the next mode
-        # This is a heuristic to avoid planning for very short durations
         if remaining < 1e-1:
             print(f"WARNING: Remaining time {remaining:.4f} < 0.1s. Increasing to 0.1s to avoid numerical issues.")
 
@@ -569,6 +590,7 @@ class PlanarPushingMPC:
         overlay_traj: bool = True,
         animation_lims: Optional[Tuple[float, float, float, float]] = None,
         hardware: bool = False,
+        rounded: bool = True,
     ) -> Optional[PlanarPushingPath]:
         """
         Using current time, plan a new path from the current state and pusher velocity.
@@ -609,13 +631,15 @@ class PlanarPushingMPC:
             soft_source_node_pose_constraint=soft_source_node_pose_constraint if is_in_contact else False,
         )
 
-        path = self.planner.plan_path(self.solver_params, active_vertices=mode_sequence, store_result=False)
+        path = self.planner.plan_path(
+            self.solver_params, active_vertices=mode_sequence, store_result=False, rounded=rounded
+        )
 
         # Save outputs if requested
         if path is not None and (save_video or save_traj or save_unrounded_video) and output_folder:
             os.makedirs(output_folder, exist_ok=True)
 
-            traj = path.to_traj(rounded=True)
+            traj = path.to_traj(rounded=rounded)
 
             if save_traj:
                 trajectory_folder = f"{output_folder}/{output_name}/trajectory"
@@ -653,7 +677,7 @@ class PlanarPushingMPC:
 
                 if save_video:
                     if traj is not None:
-                        os.makedirs(f"{output_folder}/{output_name}", exist_ok=True)
+                        os.makedirs(f"{output_folder}", exist_ok=True)
 
                         visualize_planar_pushing_trajectory(
                             traj,
@@ -668,7 +692,7 @@ class PlanarPushingMPC:
                 if save_unrounded_video:
                     unrounded_traj = path.to_traj(rounded=False)
                     if unrounded_traj is not None:
-                        os.makedirs(f"{output_folder}/{output_name}", exist_ok=True)
+                        os.makedirs(f"{output_folder}", exist_ok=True)
 
                         # Create overlay using the unrounded trajectory so it matches the video
                         unrounded_overlay_trajs_arg = None

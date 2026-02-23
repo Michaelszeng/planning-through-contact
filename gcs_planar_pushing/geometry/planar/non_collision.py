@@ -356,11 +356,37 @@ class NonCollisionMode(AbstractContactMode):
 
                 self.distance_to_object_socp_constraints.extend(constraints_for_knot_point)
 
-    def set_slider_pose(self, pose: PlanarPose) -> None:
+    def set_slider_pose(self, pose: PlanarPose, soft: bool = True) -> None:
         self.slider_pose = pose
-        self.prog.AddLinearConstraint(self.variables.cos_th == np.cos(pose.theta))
-        self.prog.AddLinearConstraint(self.variables.sin_th == np.sin(pose.theta))
-        self.prog.AddLinearConstraint(eq(self.variables.p_WB, pose.pos()))
+        if not soft:
+            self.prog.AddLinearConstraint(self.variables.cos_th == np.cos(pose.theta))
+            self.prog.AddLinearConstraint(self.variables.sin_th == np.sin(pose.theta))
+            self.prog.AddLinearConstraint(eq(self.variables.p_WB, pose.pos()))
+        else:
+            W_POS = 1e8
+            W_ANG = 1e8
+            EPS_POS = 0.010
+            EPS_ANG = 0.05
+
+            cos_t, sin_t = np.cos(pose.theta), np.sin(pose.theta)
+
+            # Bounding box around target to keep the convex set compact
+            self.prog.AddBoundingBoxConstraint(pose.x - EPS_POS, pose.x + EPS_POS, self.variables.p_WB_x)
+            self.prog.AddBoundingBoxConstraint(pose.y - EPS_POS, pose.y + EPS_POS, self.variables.p_WB_y)
+            self.prog.AddBoundingBoxConstraint(cos_t - EPS_ANG, cos_t + EPS_ANG, self.variables.cos_th)
+            self.prog.AddBoundingBoxConstraint(sin_t - EPS_ANG, sin_t + EPS_ANG, self.variables.sin_th)
+
+            # Quadratic cost on position error: W_POS * ||p - p_target||^2
+            pos_vars = np.array([self.variables.p_WB_x, self.variables.p_WB_y])
+            pos_target = np.array([pose.x, pose.y])
+            Q = 2 * W_POS * np.eye(2)
+            b = -2 * W_POS * pos_target
+            c = W_POS * pos_target @ pos_target
+            self.prog.AddQuadraticCost(Q, b, c, pos_vars, is_convex=True)
+
+            # Linear cost on angle error: W_ANG * (1 - cos(dθ))
+            angle_cost = W_ANG * (1 - cos_t * self.variables.cos_th - sin_t * self.variables.sin_th)
+            self.prog.AddLinearCost(angle_cost)
 
     def set_finger_initial_pose(self, pose: PlanarPose, soft_source_node_pose_constraint: bool = False) -> None:
         """
@@ -370,8 +396,8 @@ class NonCollisionMode(AbstractContactMode):
         if not soft_source_node_pose_constraint:
             self.prog.AddLinearConstraint(eq(self.variables.p_BPs[0], pose.pos()))
         else:
-            A = 10000 * np.eye(2)
-            b = -10000 * pose.pos().flatten()
+            A = 10000000 * np.eye(2)
+            b = -10000000 * pose.pos().flatten()
             cost = self.prog.AddL2NormCost(A, b, self.variables.p_BPs[0].flatten())
             self.l2_norm_costs.append(cost)
 
