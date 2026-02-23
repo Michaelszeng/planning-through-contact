@@ -36,9 +36,11 @@ start_and_goal = PlanarPushingStartAndGoal(
     pusher_target_pose=pusher_target_pose,
 )
 
-t = 3
-
 print("Constructing MPC Planner...")
+
+t = 5
+is_in_contact = True  # Whether the system is in contact with the slider at time t
+current_segment_index = 2  # The segment index that the system is currently in at/before time t
 
 # Load original plan from cache if it exists to speed up testing
 CACHE_PATH = f"mpc_path_cache_t={t}.pkl"
@@ -61,27 +63,18 @@ else:
     )
     mpc.original_path.save(CACHE_PATH)
 
+mpc.current_segment_index = current_segment_index
+
 print("Planning with MPC...")
 current_slider_pose = mpc.original_traj.get_slider_planar_pose(t)
 current_pusher_pose = mpc.original_traj.get_pusher_planar_pose(t)
 current_pusher_velocity = mpc.original_traj.get_pusher_velocity(t)
-print(f"current_pusher_velocity: {current_pusher_velocity}")
 
+# Try some perturbation
 pos = current_pusher_pose.pos()
 theta = current_pusher_pose.theta
-current_pusher_pose = PlanarPose(pos[0, 0] + 0.01, pos[1, 0], theta)  # Try an augmentation
+current_pusher_pose = PlanarPose(pos[0, 0] + 0.001, pos[1, 0], theta)
 current_pusher_velocity = current_pusher_velocity * 1.05
-
-# current_slider_pose = PlanarPose(0.4991755125699597, -0.03995089541666773, 3.0110513740188143)
-# current_pusher_pose = PlanarPose(0.5861310676117617, 0.1495927046771189, 0.00010802307327750782)
-
-# current_slider_pose = mpc.original_traj.get_slider_planar_pose(0.1)
-# current_pusher_pose = mpc.original_traj.get_pusher_planar_pose(0.1)
-# current_pusher_velocity = mpc.original_traj.get_pusher_velocity(0.1)
-
-# current_slider_pose = PlanarPose(0.49916350319441594, -0.039942707670509475, 3.0109461664097754)
-# current_pusher_pose = PlanarPose(0.587, 0.15, 0.0)
-# current_pusher_velocity = np.array([2.3674e-07, -3.6202e-08])
 
 print(f"current_slider_pose: {current_slider_pose}")
 print(f"current_pusher_pose: {current_pusher_pose}")
@@ -93,6 +86,8 @@ path = mpc.plan(
     current_slider_pose=current_slider_pose,
     current_pusher_pose=current_pusher_pose,
     current_pusher_velocity=current_pusher_velocity,
+    is_in_contact=is_in_contact,
+    enforce_monotonic_progress=True,
     output_folder="trajectories_mpc",
     output_name=f"arbitrary_small_t_pusher_trajectory_t={t}",
     save_video=True,

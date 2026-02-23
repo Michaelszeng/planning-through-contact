@@ -182,6 +182,7 @@ class NonCollisionMode(AbstractContactMode):
         set_slider_pose: bool = True,
         terminal_cost: bool = False,
         collision_free_region: Optional[PolytopeContactLocation] = None,
+        soft_source_node_pose_constraint: bool = False,
     ) -> "NonCollisionMode":
         p_WP = pusher_pose_world.pos()
         R_WB = slider_pose_world.two_d_rot_matrix()
@@ -210,7 +211,7 @@ class NonCollisionMode(AbstractContactMode):
             mode.set_slider_pose(slider_pose_world)
 
         if initial_or_final == "initial":
-            mode.set_finger_initial_pose(pusher_pose_body)
+            mode.set_finger_initial_pose(pusher_pose_body, soft_source_node_pose_constraint)
         else:  # final
             mode.set_finger_final_pose(pusher_pose_body)
 
@@ -361,12 +362,18 @@ class NonCollisionMode(AbstractContactMode):
         self.prog.AddLinearConstraint(self.variables.sin_th == np.sin(pose.theta))
         self.prog.AddLinearConstraint(eq(self.variables.p_WB, pose.pos()))
 
-    def set_finger_initial_pose(self, pose: PlanarPose) -> None:
+    def set_finger_initial_pose(self, pose: PlanarPose, soft_source_node_pose_constraint: bool = False) -> None:
         """
         NOTE: Only sets the position of the finger (a point finger has no rotation).
         """
         self.finger_initial_pose = pose
-        self.prog.AddLinearConstraint(eq(self.variables.p_BPs[0], pose.pos()))
+        if not soft_source_node_pose_constraint:
+            self.prog.AddLinearConstraint(eq(self.variables.p_BPs[0], pose.pos()))
+        else:
+            A = 10000 * np.eye(2)
+            b = -10000 * pose.pos().flatten()
+            cost = self.prog.AddL2NormCost(A, b, self.variables.p_BPs[0].flatten())
+            self.l2_norm_costs.append(cost)
 
     def set_finger_final_pose(self, pose: PlanarPose) -> None:
         """

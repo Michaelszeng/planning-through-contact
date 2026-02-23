@@ -63,7 +63,19 @@ class So3TrajSegment:
             knot_point_times = np.linspace(start_time, end_time, num_samples)
             samples = Rs
 
-        Rs_in_SO3 = [from_so2_to_so3(R) for R in samples]
+        # Normalize R to be in SO(2)
+        samples_normalized = []
+        for R in samples:
+            # R is [[c, -s], [s, c]]
+            c = R[0, 0]
+            s = R[1, 0]
+            norm = np.sqrt(c * c + s * s)
+            if norm > 1e-6:
+                samples_normalized.append(R / norm)
+            else:
+                samples_normalized.append(np.eye(2))  # Fallback
+
+        Rs_in_SO3 = [from_so2_to_so3(R) for R in samples_normalized]
 
         traj = PiecewiseQuaternionSlerp(knot_point_times, Rs_in_SO3)  # type: ignore
         return cls(start_time, end_time, Rs, traj)
@@ -713,6 +725,16 @@ class PlanarPushingTrajectory(AbstractPlanarPushingTrajectory):
                 R_WB = self.path_knot_points[segment_idx].R_WB
             else:  # FaceContactVariables
                 R_WB = self.path_knot_points[segment_idx].R_WBs[t_idx]
+
+            # Normalize R_WB to be a valid rotation matrix for visualization
+            # R_WB is [[c, -s], [s, c]]
+            c = R_WB[0, 0]
+            s = R_WB[1, 0]
+            norm = np.sqrt(c * c + s * s)
+            if norm > 1e-6:
+                R_WB = R_WB / norm
+            else:
+                R_WB = np.eye(2)
 
             temp = np.eye(3)
             temp[:2, :2] = R_WB

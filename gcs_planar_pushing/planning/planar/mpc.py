@@ -86,7 +86,8 @@ class PlanarPushingMPC:
         slider_pose: PlanarPose,
         pusher_pose: PlanarPose,
         mode: AbstractContactMode,
-        tol: float = 1e-10,
+        non_coll_tol: float = 1e-10,
+        coll_tol: float = 1e-3,
     ) -> bool:
         """
         Checks if the given state is valid for the given mode.
@@ -104,12 +105,12 @@ class PlanarPushingMPC:
             plane = slider_geometry.get_hyperplane_from_location(mode.contact_location)
             dist = plane.dist_to(p_BP)
             # We allow being slightly "inside" or "outside" the specific radius distance
-            if abs(dist - pusher_radius) > tol:
+            if abs(dist - pusher_radius) > coll_tol:
                 return False
 
             # Check projection onto face (lam in [0, 1])
             lam = slider_geometry.get_lam_from_p_BP_by_projection(p_BP, mode.contact_location)
-            if lam < -tol or lam > 1.0 + tol:
+            if lam < -coll_tol or lam > 1.0 + coll_tol:
                 return False
 
             return True
@@ -122,7 +123,7 @@ class PlanarPushingMPC:
             # We fail if dist < -tol (point strictly outside by more than tol).
             region_planes = slider_geometry.get_planes_for_collision_free_region(mode.contact_location.idx)
             for plane in region_planes:
-                if plane.dist_to(p_BP) < -tol:
+                if plane.dist_to(p_BP) < -non_coll_tol:
                     return False
 
             # Then, check that pusher is not in contact with the slider
@@ -130,7 +131,7 @@ class PlanarPushingMPC:
             # We fail if dist < pusher_radius - tol
             contact_planes = slider_geometry.get_contact_planes(mode.contact_location.idx)
             for plane in contact_planes:
-                if plane.dist_to(p_BP) < pusher_radius - tol:
+                if plane.dist_to(p_BP) < pusher_radius - non_coll_tol:
                     return False
 
             return True
@@ -142,16 +143,12 @@ class PlanarPushingMPC:
         slider_pose: PlanarPose,
         pusher_pose: PlanarPose,
         t: float,
+        is_in_contact: bool,
         enforce_monotonic_progress: bool = True,
     ) -> Tuple[int, PolytopeContactLocation]:
         """
         Finds the index of the mode in the original path that contains the current state,
         and returns the collision-free region for that mode.
-        If multiple modes contain the state, uses time t to break ties.
-        If no mode contains the state, fall back to the original planned mode at time t.
-
-        If enforce_monotonic_progress is True, the function will only return a mode that is
-        either the system's current mode or the one mode after the current mode.
         """
         # Determine candidate modes
         if enforce_monotonic_progress:  # Candidates only include current and next mode
@@ -159,44 +156,49 @@ class PlanarPushingMPC:
             if self.current_segment_index + 1 < len(self.original_path.pairs):
                 candidates.append(self.current_segment_index + 1)
         else:
-            candidates = range(len(self.original_path.pairs))  # All modes are candidates
+            candidates = list(range(len(self.original_path.pairs)))  # All modes are candidates
 
-        # Find all candidate modes that the state *could* be in
-        valid_indices = []
-        for i in candidates:
-            if self._is_state_in_mode(slider_pose, pusher_pose, self.original_path.pairs[i].mode):
-                valid_indices.append(i)
-
-        # If no mode is valid, fallback
-        if len(valid_indices) == 0:
-            print("WARNING: No mode is valid for the current state. Falling back to the original planned mode.")
-            if enforce_monotonic_progress:
-                valid_indices = list(candidates)
-            segment_idx = self.original_traj._get_curr_segment_idx(t)  # type: ignore
-            valid_indices = [int(segment_idx)]
-
-        # If only one mode is valid, use it
-        if len(valid_indices) == 1:
+        # If there is contact, then we expect only one candidate mode
+        if is_in_contact:
+            valid_indices = [i for i in candidates if isinstance(self.original_path.pairs[i].mode, FaceContactMode)]
+            assert len(valid_indices) == 1, f"Expected one candidate mode when in contact, but got {len(valid_indices)}"
             segment_idx = valid_indices[0]
-
-        # If multiple modes are valid, pick the one that is closest in time
+        # If there is no contact, there could be one or two (if there are two consecutive non-collision modes) candidate
+        # modes. We need to do an actual check based on the system state.
         else:
-            print("WARNING: Multiple modes are valid for the current state. Picking the one that is closest in time.")
+            candidates = [i for i in candidates if isinstance(self.original_path.pairs[i].mode, NonCollisionMode)]
+            # Find all candidate modes that the state *could* be in
+            valid_indices = [
+                i
+                for i in candidates
+                if self._is_state_in_mode(slider_pose, pusher_pose, self.original_path.pairs[i].mode)
+            ]
 
-            def _time_dist(idx: int) -> float:
-                seg_start_time = self.original_traj.start_time if idx == 0 else self.original_traj.end_times[idx - 1]
-                seg_end_time = self.original_traj.end_times[idx]
+            assert len(valid_indices) > 0, "No mode is valid for the current state somehow."
 
-                if t < seg_start_time:
-                    return seg_start_time - t
-                elif t > seg_end_time:
-                    return t - seg_end_time
-                else:
-                    return 0.0  # t is inside the segment
+            # If only one mode is valid, use it
+            if len(valid_indices) == 1:
+                segment_idx = valid_indices[0]
+            # If multiple modes are valid, pick the one that is closest in time
+            else:
+                print("WARNING: Multiple modes are valid for the current state.")
 
-            segment_idx = min(valid_indices, key=_time_dist)
+                def _time_dist(idx: int) -> float:
+                    seg_start_time = (
+                        self.original_traj.start_time if idx == 0 else self.original_traj.end_times[idx - 1]
+                    )
+                    seg_end_time = self.original_traj.end_times[idx]
 
-        self.current_segment_index = segment_idx
+                    if t < seg_start_time:
+                        return seg_start_time - t
+                    elif t > seg_end_time:
+                        return t - seg_end_time
+                    else:
+                        return 0.0  # t is inside the segment
+
+                segment_idx = min(valid_indices, key=_time_dist)
+
+        self.current_segment_index = segment_idx  # Save the segment index for the next iteration
 
         # Extract the region corresponding to the mode index found above
         mode = self.original_path.pairs[segment_idx].mode
@@ -209,6 +211,88 @@ class PlanarPushingMPC:
             collision_free_region = mode.contact_location
 
         return segment_idx, collision_free_region
+
+    # def _get_segment_and_region_from_state(
+    #     self,
+    #     slider_pose: PlanarPose,
+    #     pusher_pose: PlanarPose,
+    #     t: float,
+    #     enforce_monotonic_progress: bool = True,
+    #     is_in_contact: Optional[bool] = None,
+    # ) -> Tuple[int, PolytopeContactLocation]:
+    #     """
+    #     Finds the index of the mode in the original path that contains the current state,
+    #     and returns the collision-free region for that mode.
+    #     If multiple modes contain the state, uses time t to break ties.
+    #     If no mode contains the state, fall back to the original planned mode at time t.
+
+    #     If enforce_monotonic_progress is True, the function will only return a mode that is
+    #     either the system's current mode or the one mode after the current mode.
+    #     """
+    #     # Determine candidate modes
+    #     if enforce_monotonic_progress:  # Candidates only include current and next mode
+    #         candidates = [self.current_segment_index]
+    #         if self.current_segment_index + 1 < len(self.original_path.pairs):
+    #             candidates.append(self.current_segment_index + 1)
+    #     else:
+    #         candidates = list(range(len(self.original_path.pairs)))  # All modes are candidates
+
+    #     # Prune candidates based on whether we are in contact
+    #     #   If we are in contact, we only consider face contact modes
+    #     #   If we are not in contact, we only consider non-collision modes
+    #     if is_in_contact is not None:
+    #         candidates = [
+    #             i
+    #             for i in candidates
+    #             if (
+    #                 isinstance(self.original_path.pairs[i].mode, FaceContactMode)
+    #                 if is_in_contact
+    #                 else isinstance(self.original_path.pairs[i].mode, NonCollisionMode)
+    #             )
+    #         ]
+
+    #     # Find all candidate modes that the state *could* be in
+    #     valid_indices = []
+    #     for i in candidates:
+    #         if self._is_state_in_mode(slider_pose, pusher_pose, self.original_path.pairs[i].mode):
+    #             valid_indices.append(i)
+
+    #     assert len(valid_indices) > 0, "No mode is valid for the current state somehow."
+
+    #     # If only one mode is valid, use it
+    #     if len(valid_indices) == 1:
+    #         segment_idx = valid_indices[0]
+
+    #     # If multiple modes are valid, pick the one that is closest in time
+    #     else:
+    #         print("WARNING: Multiple modes are valid for the current state. Picking the one that is closest in time.")
+
+    #         def _time_dist(idx: int) -> float:
+    #             seg_start_time = self.original_traj.start_time if idx == 0 else self.original_traj.end_times[idx - 1]
+    #             seg_end_time = self.original_traj.end_times[idx]
+
+    #             if t < seg_start_time:
+    #                 return seg_start_time - t
+    #             elif t > seg_end_time:
+    #                 return t - seg_end_time
+    #             else:
+    #                 return 0.0  # t is inside the segment
+
+    #         segment_idx = min(valid_indices, key=_time_dist)
+
+    #     self.current_segment_index = segment_idx
+
+    #     # Extract the region corresponding to the mode index found above
+    #     mode = self.original_path.pairs[segment_idx].mode
+    #     if isinstance(mode, FaceContactMode):
+    #         # Map face index to region index
+    #         slider_geometry = self.planner.config.dynamics_config.slider.geometry
+    #         region_idx = slider_geometry.get_collision_free_region_for_loc_idx(mode.contact_location.idx)
+    #         collision_free_region = PolytopeContactLocation(ContactLocation.FACE, region_idx)
+    #     else:
+    #         collision_free_region = mode.contact_location
+
+    #     return segment_idx, collision_free_region
 
     def _get_closest_time_and_segment(
         self,
@@ -283,6 +367,7 @@ class PlanarPushingMPC:
         mode_sequence: List[str],
         current_pusher_velocity: Optional[npt.NDArray[np.float64]],
         collision_free_region: Optional[PolytopeContactLocation] = None,
+        soft_source_node_pose_constraint: bool = False,
     ) -> None:
         # Update config
         assert self.planner.config.start_and_goal is not None
@@ -322,7 +407,10 @@ class PlanarPushingMPC:
         # This creates a new source vertex and connects it to the existing GCS instance
         # Then, call _set_initial_poses to set this new source vertex in the GCS
         self.planner._set_initial_poses(
-            current_pusher_pose, current_slider_pose, collision_free_region=collision_free_region
+            current_pusher_pose,
+            current_slider_pose,
+            collision_free_region=collision_free_region,
+            soft_source_node_pose_constraint=soft_source_node_pose_constraint,
         )
 
         if mode_sequence is not None and len(mode_sequence) >= 2:
@@ -346,6 +434,10 @@ class PlanarPushingMPC:
                             original_mode.contact_location,
                             self.config,
                         )
+                        # # Relax rounding tolerance for MPC to handle small numerical errors
+                        # self.solver_params.nonl_round_major_feas_tol = 1e-3
+                        # self.solver_params.nonl_round_minor_feas_tol = 1e-3
+                        # self.solver_params.nonl_round_opt_tol = 1e-3
                     elif isinstance(original_mode, NonCollisionMode):
                         new_mode = NonCollisionMode(
                             f"{first_mode_name}_SHORT",
@@ -354,40 +446,40 @@ class PlanarPushingMPC:
                             original_mode.contact_location,
                             self.config,
                         )
+                        # self.solver_params.nonl_round_major_feas_tol = 1e-5
+                        # self.solver_params.nonl_round_minor_feas_tol = 1e-5
+                        # self.solver_params.nonl_round_opt_tol = 1e-5
 
                     if new_mode is not None:
                         # Enforce initial velocity constraint if applicable
-                        if isinstance(new_mode, NonCollisionMode) and current_pusher_velocity is not None:
-                            # Constrain initial velocity
-                            # v_world = v_pusher_velocity  (pusher velocity in world frame)
-                            # v_body = R_WB.T @ v_world  (pusher velocity in slider body frame)
-                            # (slider is static during non-collision mode)
+                        if current_pusher_velocity is not None:
                             R_WB = current_slider_pose.two_d_rot_matrix()
-                            v_body = R_WB.T @ current_pusher_velocity
+                            # pusher velocity in world frame, expressed in slider body frame
+                            v_WP_B = R_WB.T @ current_pusher_velocity
 
-                            # Velocity constraint for Bezier curve:
-                            # For a Bezier curve of degree n parameterized over [0, T]:
-                            #   dB/dt |_{t=0} = n/T * (P1 - P0)
-                            # So to achieve initial velocity v_body:
-                            #   v_body = order / time_in_mode * (c1 - c0)
-                            #   c1 - c0 = v_body * time_in_mode / order
-                            decision_vars = new_mode.variables
-                            assert isinstance(decision_vars, NonCollisionVariables)
-                            c0_x = decision_vars.p_BP_xs[0]  # 1st control point x
-                            c0_y = decision_vars.p_BP_ys[0]  # 1st control point y
-                            c1_x = decision_vars.p_BP_xs[1]  # 2nd control point x
-                            c1_y = decision_vars.p_BP_ys[1]  # 2nd control point y
+                            if isinstance(new_mode, NonCollisionMode):
+                                # (slider is static during non-collision mode)
 
-                            order = decision_vars.num_knot_points - 1
-                            scale = decision_vars.time_in_mode / order
-                            new_mode.prog.AddLinearEqualityConstraint(c1_x - c0_x == v_body[0] * scale)
-                            new_mode.prog.AddLinearEqualityConstraint(c1_y - c0_y == v_body[1] * scale)
-                            # vel_tol = 1e-1  # tolerance
-                            # c_tol = vel_tol * scale
-                            # new_mode.prog.AddLinearConstraint(c1_x - c0_x <= v_body[0] * scale + c_tol)
-                            # new_mode.prog.AddLinearConstraint(c1_x - c0_x >= v_body[0] * scale - c_tol)
-                            # new_mode.prog.AddLinearConstraint(c1_y - c0_y <= v_body[1] * scale + c_tol)
-                            # new_mode.prog.AddLinearConstraint(c1_y - c0_y >= v_body[1] * scale - c_tol)
+                                # Velocity constraint for Bezier curve:
+                                # For a Bezier curve of degree n parameterized over [0, T]:
+                                #   dB/dt |_{t=0} = n/T * (P1 - P0)
+                                # So to achieve initial velocity v_WP_B:
+                                #   v_WP_B = order / time_in_mode * (c1 - c0)
+                                #   c1 - c0 = v_WP_B * time_in_mode / order
+                                decision_vars = new_mode.variables
+                                assert isinstance(decision_vars, NonCollisionVariables)
+                                c0_x = decision_vars.p_BP_xs[0]  # 1st control point x
+                                c0_y = decision_vars.p_BP_ys[0]  # 1st control point y
+                                c1_x = decision_vars.p_BP_xs[1]  # 2nd control point x
+                                c1_y = decision_vars.p_BP_ys[1]  # 2nd control point y
+
+                                order = decision_vars.num_knot_points - 1
+                                scale = decision_vars.time_in_mode / order
+                                new_mode.prog.AddLinearEqualityConstraint(c1_x - c0_x == v_WP_B[0] * scale)
+                                new_mode.prog.AddLinearEqualityConstraint(c1_y - c0_y == v_WP_B[1] * scale)
+                            # We do not enforce velocity constraints for face contact modes because
+                            # face contact modes are parameterized by piecewise first-order-hold curves
+                            # which are internally discontinuous anyway.
 
                         # Add to graph
                         new_vertex = self.planner.gcs.AddVertex(new_mode.get_convex_set(), new_mode.name)
@@ -465,15 +557,18 @@ class PlanarPushingMPC:
         current_slider_pose: PlanarPose,
         current_pusher_pose: PlanarPose,
         current_pusher_velocity: Optional[npt.NDArray[np.float64]],
+        is_in_contact: bool = False,
+        enforce_monotonic_progress: bool = True,
+        soft_source_node_pose_constraint: bool = True,
         output_folder: str = "",
         output_name: str = "",
         save_video: bool = False,
         save_traj: bool = False,
-        interpolate_video: bool = False,
-        overlay_traj: bool = False,
+        save_unrounded_video: bool = False,
+        interpolate_video: bool = True,
+        overlay_traj: bool = True,
         animation_lims: Optional[Tuple[float, float, float, float]] = None,
         hardware: bool = False,
-        enforce_monotonic_progress: bool = False,
     ) -> Optional[PlanarPushingPath]:
         """
         Using current time, plan a new path from the current state and pusher velocity.
@@ -496,14 +591,14 @@ class PlanarPushingMPC:
             current_slider_pose,
             current_pusher_pose,
             t=best_t,  # time used to break ties or as fallbackonly
-            enforce_monotonic_progress=enforce_monotonic_progress,
+            is_in_contact=is_in_contact,
         )
 
         mode_sequence = self._get_remaining_mode_sequence(segment_idx=segment_idx)
         print(f"    Mode sequence: {mode_sequence}")
 
         self._update_mode_timing(t, segment_idx)
-        print(f"    Remaining time in current mode: {self.config.time_first_mode}")
+        print(f"    Current mode remaining t: {self.config.time_first_mode}")
 
         self._update_initial_poses(
             current_slider_pose,
@@ -511,12 +606,13 @@ class PlanarPushingMPC:
             mode_sequence,
             current_pusher_velocity,
             collision_free_region=collision_free_region,
+            soft_source_node_pose_constraint=soft_source_node_pose_constraint if is_in_contact else False,
         )
 
         path = self.planner.plan_path(self.solver_params, active_vertices=mode_sequence, store_result=False)
 
         # Save outputs if requested
-        if path is not None and (save_video or save_traj) and output_folder:
+        if path is not None and (save_video or save_traj or save_unrounded_video) and output_folder:
             os.makedirs(output_folder, exist_ok=True)
 
             traj = path.to_traj(rounded=True)
@@ -540,30 +636,56 @@ class PlanarPushingMPC:
                     )
                 print(f"Saved trajectory to {trajectory_folder}")
 
-            if save_video:
-                if traj is not None:
-                    # Prepare overlay trajectories if requested
-                    overlay_trajs_arg = None
-                    if overlay_traj:
-                        # Original trajectory: black for both slider and pusher
-                        original_slider_color = COLORS["black"]
-                        original_pusher_color = COLORS["black"]
-                        # New trajectory: use object colors (slider=aquamarine, pusher=firebrick)
-                        new_slider_color = COLORS["aquamarine4"]
-                        new_pusher_color = COLORS["firebrick3"]
-                        overlay_trajs_arg = [
-                            (self.original_traj, original_slider_color, original_pusher_color),
-                            (traj, new_slider_color, new_pusher_color),
-                        ]
+            if save_video or save_unrounded_video:
+                # Prepare overlay trajectories if requested
+                overlay_trajs_arg = None
+                if overlay_traj:
+                    # Original trajectory: black for both slider and pusher
+                    original_slider_color = COLORS["black"]
+                    original_pusher_color = COLORS["black"]
+                    # New trajectory: use object colors (slider=aquamarine, pusher=firebrick)
+                    new_slider_color = COLORS["aquamarine4"]
+                    new_pusher_color = COLORS["firebrick3"]
+                    overlay_trajs_arg = [
+                        (self.original_traj, original_slider_color, original_pusher_color),
+                        (traj, new_slider_color, new_pusher_color),
+                    ]
 
-                    visualize_planar_pushing_trajectory(
-                        traj,
-                        save=True,
-                        filename=f"{output_folder}/{output_name}",
-                        visualize_knot_points=not interpolate_video,
-                        lims=animation_lims,
-                        overlay_trajs=overlay_trajs_arg,
-                    )
-                    print(f"Saved video to {output_folder}")
+                if save_video:
+                    if traj is not None:
+                        os.makedirs(f"{output_folder}/{output_name}", exist_ok=True)
+
+                        visualize_planar_pushing_trajectory(
+                            traj,
+                            save=True,
+                            filename=f"{output_folder}/{output_name}",
+                            visualize_knot_points=not interpolate_video,
+                            lims=animation_lims,
+                            overlay_trajs=overlay_trajs_arg,
+                        )
+                        print(f"Saved video to {output_folder}/{output_name}")
+
+                if save_unrounded_video:
+                    unrounded_traj = path.to_traj(rounded=False)
+                    if unrounded_traj is not None:
+                        os.makedirs(f"{output_folder}/{output_name}", exist_ok=True)
+
+                        # Create overlay using the unrounded trajectory so it matches the video
+                        unrounded_overlay_trajs_arg = None
+                        if overlay_traj:
+                            unrounded_overlay_trajs_arg = [
+                                (self.original_traj, COLORS["black"], COLORS["black"]),
+                                (unrounded_traj, COLORS["aquamarine4"], COLORS["firebrick3"]),
+                            ]
+
+                        visualize_planar_pushing_trajectory(
+                            unrounded_traj,
+                            save=True,
+                            filename=f"{output_folder}/{output_name}_unrounded",
+                            visualize_knot_points=not interpolate_video,
+                            lims=animation_lims,
+                            overlay_trajs=unrounded_overlay_trajs_arg,
+                        )
+                        print(f"Saved unrounded video to {output_folder}/{output_name}_unrounded")
 
         return path

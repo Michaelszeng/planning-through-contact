@@ -28,9 +28,7 @@ class PlanarPose:
         theta = RollPitchYaw(pose.rotation()).vector()[Z_AXIS]
         return cls(x, y, theta)
 
-    def to_pose(
-        self, z_value: float, z_axis_is_positive: bool = False
-    ) -> RigidTransform:
+    def to_pose(self, z_value: float, z_axis_is_positive: bool = False) -> RigidTransform:
         """
         Creates a RigidTransform from a planar pose, with the z-axis pointing downwards.
 
@@ -61,9 +59,7 @@ class PlanarPose:
         theta = RollPitchYaw(Quaternion(q_wxyz)).vector()[Z_AXIS]
         return cls(x, y, theta)
 
-    def to_generalized_coords(
-        self, z_value: float, z_axis_is_positive: bool = False
-    ) -> npt.NDArray[np.float64]:
+    def to_generalized_coords(self, z_value: float, z_axis_is_positive: bool = False) -> npt.NDArray[np.float64]:
         """
         Returns the full RigidBody pose as generalized coordinates: [quaternion, translation]'
 
@@ -107,9 +103,7 @@ class PlanarPose:
         return np.sin(self.theta)
 
     def __add__(self, other: "PlanarPose") -> "PlanarPose":
-        return PlanarPose(
-            x=self.x + other.x, y=self.y + other.y, theta=self.theta + other.theta
-        )
+        return PlanarPose(x=self.x + other.x, y=self.y + other.y, theta=self.theta + other.theta)
 
     def rotate(self, theta: float) -> "PlanarPose":
         R = two_d_rotation_matrix_from_angle(theta)
@@ -118,9 +112,7 @@ class PlanarPose:
         return PlanarPose(new_pos[0, 0], new_pos[1, 0], new_th)
 
     def __str__(self) -> str:
-        field_strings = [
-            f"{field.name}: {getattr(self, field.name)}" for field in fields(self)
-        ]
+        field_strings = [f"{field.name}: {getattr(self, field.name)}" for field in fields(self)]
         return ", ".join(field_strings)
 
 

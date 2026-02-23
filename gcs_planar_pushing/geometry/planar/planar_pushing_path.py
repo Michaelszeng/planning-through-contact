@@ -45,11 +45,28 @@ def assemble_progs_from_contact_modes(
     prog = MathematicalProgram()
 
     for mode in modes:
-        mode_prog = mode.prog  # type: ignore
+        mode_prog = mode.prog
         if remove_redundant_constraints:
             if isinstance(mode, FaceContactMode):
                 for c in mode.redundant_constraints:
                     mode_prog.RemoveConstraint(c)
+
+        # Replace hard quadratic equality constraints with soft quadratic equality constraints for rounding
+        slacks = []
+        changed_constraints = []
+        changed_costs = []
+        if isinstance(mode, FaceContactMode):
+            for k, ang_vel_expr in enumerate(mode.ang_vel_expressions):
+                mode_prog.RemoveConstraint(mode.constraints["rotational_dynamics"][k])
+                # Add a slack variable
+                s = mode_prog.NewContinuousVariables(1, f"slack_{k}").item()
+                slacks.append(s)
+                # Change equality g(x) = 0  →  g(x) = s
+                changed_constraints.append(mode_prog.AddConstraint(ang_vel_expr == s))
+
+                # Penalize the slack
+                weight = 1e3
+                changed_costs.append(mode_prog.AddQuadraticCost(weight * s**2))
 
         vars = mode_prog.decision_variables()
         prog.AddDecisionVariables(vars)
@@ -59,6 +76,17 @@ def assemble_progs_from_contact_modes(
 
         for c in mode_prog.GetAllCosts():
             prog.AddCost(c.evaluator(), c.variables())
+
+        # Remove the extra variables/costs that we added for rounding and replace them with the original constraints
+        if isinstance(mode, FaceContactMode):
+            for c in mode.constraints["rotational_dynamics"]:
+                mode_prog.AddConstraint(c)
+            for c in changed_constraints:
+                mode_prog.RemoveConstraint(c)
+            for c in changed_costs:
+                mode_prog.RemoveCost(c)
+            for s in slacks:
+                mode_prog.RemoveDecisionVariable(s)
 
     return prog
 
@@ -551,24 +579,26 @@ class PlanarPushingPath:
         )
         # The performance seems to be better when these (minor step) parameters are left
         # to their default value
-        # solver_options.SetOption(
-        #     snopt.solver_id(),
-        #     "Minor Feasibility Tolerance",
-        #     solver_params.nonl_round_minor_feas_tol,
-        # )
-        # solver_options.SetOption(
-        #     snopt.solver_id(),
-        #     "Minor Optimality Tolerance",
-        #     solver_params.nonl_round_opt_tol,
-        # )
+        solver_options.SetOption(
+            snopt.solver_id(),
+            "Minor Feasibility Tolerance",
+            solver_params.nonl_round_minor_feas_tol,
+        )
+        solver_options.SetOption(
+            snopt.solver_id(),
+            "Minor Optimality Tolerance",
+            solver_params.nonl_round_opt_tol,
+        )
         solver_options.SetOption(
             snopt.solver_id(),
             "Major iterations limit",
             solver_params.nonl_round_major_iter_limit,
         )
 
+        mode_prog_vars = np.concatenate([mode.prog.decision_variables() for _, mode in self.pairs])
+        prog.SetInitialGuess(mode_prog_vars, initial_guess)
         start = time.time()
-        result = snopt.Solve(prog, initial_guess, solver_options=solver_options)  # type: ignore
+        result = snopt.Solve(prog, solver_options=solver_options)  # type: ignore
         end = time.time()
         self.rounding_time = end - start
 

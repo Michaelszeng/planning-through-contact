@@ -52,9 +52,8 @@ class BoundType(Enum):
 # TODO there is definitely a much more efficient way of doing this
 def _linear_binding_to_expressions(binding: Binding) -> NpExpressionArray:
     """
-    Takes in a binding and returns a polynomial p that should satisfy\
+    Takes in a binding and returns a polynomial p that should satisfy
     p(x) = 0 for equality constraints, p(x) >= for inequality constraints
-    
     """
     # NOTE: I cannot use binding.evaluator().Eval(binding.variables())
     # here, because it ignores the constant term for linear constraints! Is this a bug?
@@ -88,9 +87,7 @@ def _linear_bindings_to_affine_terms(
     if len(linear_bindings) > 0:
         binding_type = type(linear_bindings[0].evaluator())
         if not all([isinstance(b.evaluator(), binding_type) for b in linear_bindings]):
-            raise ValueError(
-                "When converting to homogenous form, all bindings must be either eq or ineqs."
-            )
+            raise ValueError("When converting to homogenous form, all bindings must be either eq or ineqs.")
 
         linear_exprs = np.concatenate(
             [
@@ -108,9 +105,7 @@ def _linear_bindings_to_affine_terms(
     return A, b.reshape((-1, 1))
 
 
-def _affine_terms_to_homogenous_form(
-    A: npt.NDArray[np.float64], b: npt.NDArray[np.float64]
-) -> npt.NDArray[np.float64]:
+def _affine_terms_to_homogenous_form(A: npt.NDArray[np.float64], b: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
     """
     Assumes Ax + b = 0 should hold (note the sign difference from Ax = b)
     """
@@ -126,9 +121,7 @@ def linear_bindings_to_homogenuous_form(
     """
     Returns the matrix that satisfies [b A][1 x]' = 0
     """
-    A, b = _linear_bindings_to_affine_terms(
-        linear_bindings, bounding_box_expressions, vars
-    )
+    A, b = _linear_bindings_to_affine_terms(linear_bindings, bounding_box_expressions, vars)
     A_homogenous = _affine_terms_to_homogenous_form(A, b)
     return A_homogenous
 
@@ -171,9 +164,7 @@ def _quadratic_binding_to_homogenuous_form(
     return Q_hom
 
 
-def _get_monomial_coeffs(
-    poly: sym.Polynomial, basis: NpMonomialArray
-) -> npt.NDArray[np.float64]:
+def _get_monomial_coeffs(poly: sym.Polynomial, basis: NpMonomialArray) -> npt.NDArray[np.float64]:
     coeff_map = poly.monomial_to_coefficient_map()
     coeffs = np.array([coeff_map.get(m, sym.Expression(0)).Evaluate() for m in basis])
     return coeffs
@@ -201,12 +192,8 @@ def _generic_constraint_bindings_to_polynomials(
     generic_constraints_as_polynomials = sum(
         [_generic_constraint_binding_to_polynomials(b) for b in generic_bindings], []
     )
-    eq_polynomials = np.array(
-        [p for p, t in generic_constraints_as_polynomials if t == ConstraintType.EQ]
-    )
-    ineq_polynomials = np.array(
-        [p for p, t in generic_constraints_as_polynomials if t == ConstraintType.INEQ]
-    )
+    eq_polynomials = np.array([p for p, t in generic_constraints_as_polynomials if t == ConstraintType.EQ])
+    ineq_polynomials = np.array([p for p, t in generic_constraints_as_polynomials if t == ConstraintType.INEQ])
 
     return (eq_polynomials, ineq_polynomials)
 
@@ -241,19 +228,13 @@ def _collect_bounding_box_constraints(
                 if not np.isinf(b_l):
                     bounding_box_constraints.append((x_i - b_l, ConstraintType.INEQ))
 
-    bounding_box_eqs = np.array(
-        [c for c, t in bounding_box_constraints if t == ConstraintType.EQ]
-    )
-    bounding_box_ineqs = np.array(
-        [c for c, t in bounding_box_constraints if t == ConstraintType.INEQ]
-    )
+    bounding_box_eqs = np.array([c for c, t in bounding_box_constraints if t == ConstraintType.EQ])
+    bounding_box_ineqs = np.array([c for c, t in bounding_box_constraints if t == ConstraintType.INEQ])
 
     return bounding_box_eqs, bounding_box_ineqs
 
 
-def find_solution(
-    A: npt.NDArray[np.float64], b: npt.NDArray[np.float64]
-) -> npt.NDArray[np.float64]:
+def find_solution(A: npt.NDArray[np.float64], b: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
     x, _, _, _ = np.linalg.lstsq(A, b, rcond=None)
     return x
 
@@ -274,19 +255,13 @@ def eliminate_equality_constraints(
         sorted(prog.decision_variables(), key=lambda x: x.get_id())
     )  # Not really necessary, they are sorted in this order in the prog
     old_dim = len(decision_vars)
-    bounding_box_eqs, bounding_box_ineqs = _collect_bounding_box_constraints(
-        prog.bounding_box_constraints()
-    )
+    bounding_box_eqs, bounding_box_ineqs = _collect_bounding_box_constraints(prog.bounding_box_constraints())
 
-    has_linear_eq_constraints = (
-        len(prog.linear_equality_constraints()) > 0 or len(bounding_box_eqs) > 0
-    )
+    has_linear_eq_constraints = len(prog.linear_equality_constraints()) > 0 or len(bounding_box_eqs) > 0
     if not has_linear_eq_constraints:
         raise ValueError("There are no linear equality constraints to eliminate.")
 
-    A_eq, b_eq = _linear_bindings_to_affine_terms(
-        prog.linear_equality_constraints(), bounding_box_eqs, decision_vars
-    )
+    A_eq, b_eq = _linear_bindings_to_affine_terms(prog.linear_equality_constraints(), bounding_box_eqs, decision_vars)
     logger.info(f"Number of equality constraints: {A_eq.shape[0]}")
     if np.linalg.matrix_rank(A_eq, tol=1e-4) != A_eq.shape[0]:
         raise RuntimeError("Equality constraints are linearly dependent!")
@@ -300,9 +275,7 @@ def eliminate_equality_constraints(
 
     LIN_INDEP_TOL = 1e-4
     if not np.linalg.matrix_rank(A_eq, tol=LIN_INDEP_TOL) == A_eq.shape[0]:
-        raise ValueError(
-            f"A_eq has linearly independent rows (up to tolerance {LIN_INDEP_TOL})."
-        )
+        raise ValueError(f"A_eq has linearly independent rows (up to tolerance {LIN_INDEP_TOL}).")
 
     if sparsity_viz_output_dir is not None:
         visualize_sparsity(A_eq, output_dir=sparsity_viz_output_dir, postfix="_A_eq")
@@ -324,18 +297,10 @@ def eliminate_equality_constraints(
     num_vars_with_elimination = calc_num_vars(new_dim)
     diff = num_vars_without_elimination - num_vars_with_elimination
     logger.info(f"Total number of vars in original problem: {len(decision_vars)}")
-    logger.info(
-        f"Total number of vars in original problem after elimination: {len(new_decision_vars)}"
-    )
-    logger.info(
-        f"Total number of vars in original problem liminated: {len(decision_vars) - len(new_decision_vars)}"
-    )
-    logger.info(
-        f"Total number of vars in SDP relaxation of original problem: {num_vars_without_elimination}"
-    )
-    logger.info(
-        f"Total number of vars in SDP relaxation after elimination: {num_vars_with_elimination}"
-    )
+    logger.info(f"Total number of vars in original problem after elimination: {len(new_decision_vars)}")
+    logger.info(f"Total number of vars in original problem liminated: {len(decision_vars) - len(new_decision_vars)}")
+    logger.info(f"Total number of vars in SDP relaxation of original problem: {num_vars_without_elimination}")
+    logger.info(f"Total number of vars in SDP relaxation after elimination: {num_vars_with_elimination}")
     logger.info(f"Total number of vars in SDP relaxation eliminated: {diff}")
 
     for idx, b in enumerate(prog.bounding_box_constraints()):
@@ -363,12 +328,8 @@ def eliminate_equality_constraints(
         b_new = new_prog.AddLinearConstraint(new_A @ new_decision_vars, new_lb, new_ub)
 
         if sparsity_viz_output_dir is not None:
-            visualize_sparsity(
-                A, output_dir=sparsity_viz_output_dir, postfix=f"_bbox_{idx}"
-            )
-            visualize_sparsity(
-                new_A, output_dir=sparsity_viz_output_dir, postfix=f"_new_bbox_{idx}"
-            )
+            visualize_sparsity(A, output_dir=sparsity_viz_output_dir, postfix=f"_bbox_{idx}")
+            visualize_sparsity(new_A, output_dir=sparsity_viz_output_dir, postfix=f"_new_bbox_{idx}")
 
     for idx, b in enumerate(prog.linear_constraints()):
         e = b.evaluator()
@@ -396,18 +357,12 @@ def eliminate_equality_constraints(
         new_prog.AddLinearConstraint(new_A @ new_decision_vars, new_lb, new_ub)
 
         if sparsity_viz_output_dir is not None:
-            visualize_sparsity(
-                A, output_dir=sparsity_viz_output_dir, postfix=f"_A_{idx}"
-            )
-            visualize_sparsity(
-                new_A, output_dir=sparsity_viz_output_dir, postfix=f"_new_A_{idx}"
-            )
+            visualize_sparsity(A, output_dir=sparsity_viz_output_dir, postfix=f"_A_{idx}")
+            visualize_sparsity(new_A, output_dir=sparsity_viz_output_dir, postfix=f"_new_A_{idx}")
 
     has_generic_constaints = len(prog.generic_constraints()) > 0
     if has_generic_constaints:
-        raise ValueError(
-            "Cannot eliminate equality constraints for program with generic constraints."
-        )
+        raise ValueError("Cannot eliminate equality constraints for program with generic constraints.")
 
     if len(prog.quadratic_constraints()) > 0:
         for idx, binding in enumerate(prog.quadratic_constraints()):
@@ -433,23 +388,16 @@ def eliminate_equality_constraints(
             new_ub = ub - (0.5 * x_hat.T.dot(Q).dot(x_hat) + b.T.dot(x_hat)).item()
 
             constraint_empty = (
-                np.allclose(new_Q, 0)
-                and np.allclose(new_b, 0)
-                and np.isclose(new_lb, 0)
-                and np.isclose(new_ub, 0)
+                np.allclose(new_Q, 0) and np.allclose(new_b, 0) and np.isclose(new_lb, 0) and np.isclose(new_ub, 0)
             )
             if constraint_empty:
                 continue
 
-            new_prog.AddQuadraticConstraint(
-                new_Q, new_b, new_lb, new_ub, new_decision_vars
-            )
+            new_prog.AddQuadraticConstraint(new_Q, new_b, new_lb, new_ub, new_decision_vars)
 
             if sparsity_viz_output_dir is not None:
                 if not new_lb == new_ub:
-                    raise NotImplementedError(
-                        "Quadratic inequality constraints are not supported."
-                    )
+                    raise NotImplementedError("Quadratic inequality constraints are not supported.")
 
                 def _make_homogenuous(Q, b, c):
                     b = b.reshape((-1, 1))
@@ -500,15 +448,9 @@ def eliminate_equality_constraints(
             new_Q = F.T.dot(Q).dot(F)
             new_b = (x_hat.T.dot(Q).dot(F) + b.T.dot(F)).T
 
-            new_c = (
-                0.5 * x_hat.T.dot(Q).dot(x_hat)
-                + b.T.dot(x_hat)
-                + (0.5 * x_hat.T @ Q @ x_hat + b.T @ x_hat + c)
-            )
+            new_c = 0.5 * x_hat.T.dot(Q).dot(x_hat) + b.T.dot(x_hat) + (0.5 * x_hat.T @ Q @ x_hat + b.T @ x_hat + c)
 
-            new_prog.AddQuadraticCost(
-                new_Q, new_b, new_c, new_decision_vars, e.is_convex()
-            )
+            new_prog.AddQuadraticCost(new_Q, new_b, new_c, new_decision_vars, e.is_convex())
 
     return new_prog, F, x_hat
 
@@ -522,12 +464,8 @@ def create_sdp_relaxation(
 ) -> Tuple[MathematicalProgram, NpVariableArray, NpMonomialArray]:
     DEGREE_QUADRATIC = 2  # We are only relaxing (non-convex) quadratic programs
 
-    decision_vars = np.array(
-        sorted(prog.decision_variables(), key=lambda x: x.get_id())
-    )
-    num_vars = (
-        len(decision_vars) + 1
-    )  # 1 will also be a decision variable in the relaxation
+    decision_vars = np.array(sorted(prog.decision_variables(), key=lambda x: x.get_id()))
+    num_vars = len(decision_vars) + 1  # 1 will also be a decision variable in the relaxation
 
     basis = np.flip(sym.MonomialBasis(decision_vars, DEGREE_QUADRATIC))
 
@@ -538,9 +476,7 @@ def create_sdp_relaxation(
 
     relaxed_prog.AddLinearConstraint(X[0, 0] == 1)  # First variable is 1
 
-    bounding_box_eqs, bounding_box_ineqs = _collect_bounding_box_constraints(
-        prog.bounding_box_constraints()
-    )
+    bounding_box_eqs, bounding_box_ineqs = _collect_bounding_box_constraints(prog.bounding_box_constraints())
 
     has_linear_costs = len(prog.linear_costs()) > 0
     if has_linear_costs:
@@ -549,22 +485,15 @@ def create_sdp_relaxation(
     has_quadratic_costs = len(prog.quadratic_costs()) > 0
     if has_quadratic_costs:
         quadratic_costs = prog.quadratic_costs()
-        Q_cost = [
-            _quadratic_binding_to_homogenuous_form(c, basis, num_vars)
-            for c in quadratic_costs
-        ]
+        Q_cost = [_quadratic_binding_to_homogenuous_form(c, basis, num_vars) for c in quadratic_costs]
         for Q in Q_cost:
             c = np.sum(X * Q)
             relaxed_prog.AddCost(c)
 
-    has_linear_eq_constraints = (
-        len(prog.linear_equality_constraints()) > 0 or len(bounding_box_eqs) > 0
-    )
+    has_linear_eq_constraints = len(prog.linear_equality_constraints()) > 0 or len(bounding_box_eqs) > 0
     A_eq = None
     if has_linear_eq_constraints:
-        A_eq = linear_bindings_to_homogenuous_form(
-            prog.linear_equality_constraints(), bounding_box_eqs, decision_vars
-        )
+        A_eq = linear_bindings_to_homogenuous_form(prog.linear_equality_constraints(), bounding_box_eqs, decision_vars)
         multiplied_constraints = eq(A_eq.dot(X).flatten(), 0)
         for c in multiplied_constraints:
             relaxed_prog.AddLinearConstraint(c)
@@ -574,14 +503,10 @@ def create_sdp_relaxation(
         for c in linear_constraints:
             relaxed_prog.AddLinearConstraint(c)
 
-    has_linear_ineq_constraints = (
-        len(prog.linear_constraints()) > 0 or len(bounding_box_ineqs) > 0
-    )
+    has_linear_ineq_constraints = len(prog.linear_constraints()) > 0 or len(bounding_box_ineqs) > 0
     A_ineq = None
     if has_linear_ineq_constraints:
-        A_ineq = linear_bindings_to_homogenuous_form(
-            prog.linear_constraints(), bounding_box_ineqs, decision_vars
-        )
+        A_ineq = linear_bindings_to_homogenuous_form(prog.linear_constraints(), bounding_box_ineqs, decision_vars)
         multiplied_constraints = ge(A_ineq.dot(X).dot(A_ineq.T), 0)
         for c in multiplied_constraints.flatten():
             relaxed_prog.AddLinearConstraint(c)
@@ -620,8 +545,7 @@ def create_sdp_relaxation(
         _assert_max_degree(generic_constraints_as_polynomials, DEGREE_QUADRATIC)
 
         Q_eqs = [
-            _quadratic_polynomial_to_homoenuous_form(p, basis, num_vars)
-            for p in generic_eq_constraints_as_polynomials
+            _quadratic_polynomial_to_homoenuous_form(p, basis, num_vars) for p in generic_eq_constraints_as_polynomials
         ]
         for Q in Q_eqs:
             constraints = eq(np.sum(X * Q), 0).flatten()
@@ -651,14 +575,11 @@ def create_sdp_relaxation(
             )
         )
         # Don't add degree 0 polynomials (these should just be equal to 0)
-        generic_constraints_as_polynomials = [
-            c for c in generic_constraints_as_polynomials if c.TotalDegree() > 0
-        ]
+        generic_constraints_as_polynomials = [c for c in generic_constraints_as_polynomials if c.TotalDegree() > 0]
         _assert_max_degree(generic_constraints_as_polynomials, DEGREE_QUADRATIC)
 
         Q_eqs = [
-            _quadratic_polynomial_to_homoenuous_form(p, basis, num_vars)
-            for p in generic_eq_constraints_as_polynomials
+            _quadratic_polynomial_to_homoenuous_form(p, basis, num_vars) for p in generic_eq_constraints_as_polynomials
         ]
         for Q in Q_eqs:
             constraints = eq(np.sum(X * Q), 0).flatten()
@@ -690,10 +611,7 @@ def get_X_from_semidefinite_relaxation(relaxation: MathematicalProgram):
 def get_Xs_from_semidefinite_relaxation(
     relaxation: MathematicalProgram,
 ) -> list[np.ndarray]:
-    Xs = [
-        get_X_from_psd_constraint(c)
-        for c in relaxation.positive_semidefinite_constraints()
-    ]
+    Xs = [get_X_from_psd_constraint(c) for c in relaxation.positive_semidefinite_constraints()]
     return Xs
 
 
@@ -724,9 +642,7 @@ def approximate_sdp_cones_with_linear_cones(prog: MathematicalProgram) -> None:
             prog.AddLinearConstraint(X_i >= 0)
 
 
-def add_trace_cost_on_psd_cones(
-    prog: MathematicalProgram, eps: float = 1e-6
-) -> List[Binding[LinearCost]]:
+def add_trace_cost_on_psd_cones(prog: MathematicalProgram, eps: float = 1e-6) -> List[Binding[LinearCost]]:
     added_costs = []
     for psd_constraint in prog.positive_semidefinite_constraints():
         X = get_X_from_psd_constraint(psd_constraint)
@@ -804,13 +720,9 @@ def plot_eigenvalues(
         return np.sort(eigenvalues)[::-1]
 
     if isinstance(X, list):
-        assert all(
-            matrix.shape == X[0].shape for matrix in X
-        ), "All matrices must have the same shape."
+        assert all(matrix.shape == X[0].shape for matrix in X), "All matrices must have the same shape."
         N = X[0].shape[0]
-        assert all(
-            matrix.shape == (N, N) for matrix in X
-        ), "Each matrix must be square."
+        assert all(matrix.shape == (N, N) for matrix in X), "Each matrix must be square."
 
         sorted_eigenvalues_list = [compute_and_sort_eigenvalues(matrix) for matrix in X]
         eigenvalues_array = np.array(sorted_eigenvalues_list)
@@ -830,9 +742,7 @@ def plot_eigenvalues(
         title = "Eigenvalues of the PSD Matrix (sorted)"
 
     indices = np.arange(len(sorted_eigenvalues))
-    plt.bar(
-        indices, sorted_eigenvalues, yerr=yerr, capsize=5 if yerr is not None else 0
-    )
+    plt.bar(indices, sorted_eigenvalues, yerr=yerr, capsize=5 if yerr is not None else 0)
     plt.xlabel("Index")
     plt.ylabel("Eigenvalue")
     plt.title(title)
@@ -844,9 +754,7 @@ def plot_eigenvalues(
         plt.close()
 
 
-def print_eigenvalues(
-    X: npt.NDArray[np.float64], threshold: float = 1e-4, logger: Logger | None = None
-) -> None:
+def print_eigenvalues(X: npt.NDArray[np.float64], threshold: float = 1e-4, logger: Logger | None = None) -> None:
     if logger is None:
         logger = make_default_logger()
 
@@ -987,9 +895,7 @@ def solve_psd_completion(
             return get_principal_minor(M, submatrix_idxs)
 
         shared_submatrix = _get_submatrix_of_common_variables_in_matrix(sparse_X)
-        shared_submatrix_next = _get_submatrix_of_common_variables_in_matrix(
-            sparse_X_next
-        )
+        shared_submatrix_next = _get_submatrix_of_common_variables_in_matrix(sparse_X_next)
 
         shared_submatrix_val = sparse_result.GetSolution(shared_submatrix)
         shared_submatrix_next_val = sparse_result.GetSolution(shared_submatrix_next)
@@ -1055,9 +961,7 @@ def solve_psd_completion(
 
     assert result.is_success()
 
-    logger.info(
-        f"Solved PSD completion in {result.get_solver_details().optimizer_time:.2f} s"
-    )
+    logger.info(f"Solved PSD completion in {result.get_solver_details().optimizer_time:.2f} s")
     logger.info(f" -- Solution status: {result.get_solution_result()}")
 
     return result.GetSolution(Y)
@@ -1096,17 +1000,11 @@ def solve_sdp_relaxation(
     if output_dir:
         output_dir.mkdir(exist_ok=True, parents=True)
 
-    SPARSITY_OUTPUT_DIR = (
-        output_dir / "sparsity_patterns" if output_dir is not None else None
-    )
+    SPARSITY_OUTPUT_DIR = output_dir / "sparsity_patterns" if output_dir is not None else None
     if equality_elimination_method is not None:
         if variable_groups:
-            raise NotImplementedError(
-                "Cannot use variable groups when using equality elimination"
-            )
-        logger.info(
-            f"Eliminating equality constraints with {equality_elimination_method}"
-        )
+            raise NotImplementedError("Cannot use variable groups when using equality elimination")
+        logger.info(f"Eliminating equality constraints with {equality_elimination_method}")
         qcqp, F, x_hat = eliminate_equality_constraints(
             qcqp,
             sparsity_viz_output_dir=SPARSITY_OUTPUT_DIR,
@@ -1154,12 +1052,7 @@ def solve_sdp_relaxation(
             assert Z.shape == (F.shape[1], F.shape[1])
             assert z.shape == (Z.shape[0],)
             # X = F Z Fᵀ + Fzx̂ᵀ + x̂(Fz)ᵀ + x̂x̂ᵀ
-            X_val = (
-                F @ Z @ F.T
-                + np.outer(F @ z, x_hat)
-                + np.outer(x_hat, F @ z)
-                + np.outer(x_hat, x_hat)
-            )
+            X_val = F @ Z @ F.T + np.outer(F @ z, x_hat) + np.outer(x_hat, F @ z) + np.outer(x_hat, x_hat)
             x_val = (F @ z + x_hat.flatten()).reshape((-1, 1))
             Y_val = np.block([[X_val, x_val], [x_val.T, 1]])
 
@@ -1169,9 +1062,7 @@ def solve_sdp_relaxation(
 
         plot_eigenvalues(Y_vals, output_dir, postfix="_sparse_Xs")
 
-        Y_val = solve_psd_completion(
-            qcqp.decision_variables(), sdp_relaxation, relaxed_result, variable_groups
-        )
+        Y_val = solve_psd_completion(qcqp.decision_variables(), sdp_relaxation, relaxed_result, variable_groups)
 
     if plot_eigvals:
         if Y_vals is not None:
@@ -1238,9 +1129,7 @@ def to_symmetric_matrix_from_lower_triangular_columns(
     n = int(np.sqrt(2 * len(vec) + 0.25) - 0.5)
 
     if len(vec) != (n * (n + 1)) // 2:
-        raise ValueError(
-            "The length of the vector is not appropriate for forming a symmetric matrix."
-        )
+        raise ValueError("The length of the vector is not appropriate for forming a symmetric matrix.")
 
     # Create an empty symmetric matrix
     symm_matrix = np.zeros((n, n), dtype=vec.dtype)

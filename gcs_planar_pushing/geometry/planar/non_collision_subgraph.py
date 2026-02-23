@@ -172,9 +172,15 @@ class NonCollisionSubGraph:
         slider_pose: PlanarPose,
         initial_or_final: Literal["initial", "final"],
         collision_free_region: Optional[PolytopeContactLocation] = None,
+        soft_source_node_pose_constraint: bool = False,
     ) -> None:
         mode = NonCollisionMode.create_source_or_target_mode(
-            self.config, slider_pose, pusher_pose, initial_or_final, collision_free_region=collision_free_region
+            self.config,
+            slider_pose,
+            pusher_pose,
+            initial_or_final,
+            collision_free_region=collision_free_region,
+            soft_source_node_pose_constraint=soft_source_node_pose_constraint,
         )
         vertex = self.gcs.AddVertex(mode.get_convex_set(), mode.name)
 
@@ -195,8 +201,11 @@ class NonCollisionSubGraph:
         pusher_initial_pose: PlanarPose,
         slider_initial_pose: PlanarPose,
         collision_free_region: Optional[PolytopeContactLocation] = None,
+        soft_source_node_pose_constraint: bool = False,
     ) -> None:
-        self._set_initial_or_final_poses(pusher_initial_pose, slider_initial_pose, "initial", collision_free_region)
+        self._set_initial_or_final_poses(
+            pusher_initial_pose, slider_initial_pose, "initial", collision_free_region, soft_source_node_pose_constraint
+        )
 
     def set_final_poses(
         self,

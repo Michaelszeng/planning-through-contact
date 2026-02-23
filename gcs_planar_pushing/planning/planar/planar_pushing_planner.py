@@ -1,3 +1,4 @@
+import time
 from itertools import combinations
 from typing import Dict, List, Literal, Optional, Tuple
 
@@ -243,11 +244,16 @@ class PlanarPushingPlanner:
         pusher_pose: PlanarPose,
         slider_pose: PlanarPose,
         collision_free_region: Optional["PolytopeContactLocation"] = None,
+        soft_source_node_pose_constraint: bool = False,
     ) -> None:
         if self.config.allow_teleportation or not self.config.use_entry_and_exit_subgraphs:
-            self.source = self._add_single_source_or_target(pusher_pose, slider_pose, "initial", collision_free_region)
+            self.source = self._add_single_source_or_target(
+                pusher_pose, slider_pose, "initial", collision_free_region, soft_source_node_pose_constraint
+            )
         else:
-            self.source_subgraph.set_initial_poses(pusher_pose, slider_pose, collision_free_region)
+            self.source_subgraph.set_initial_poses(
+                pusher_pose, slider_pose, collision_free_region, soft_source_node_pose_constraint
+            )
             self.source = self.source_subgraph.source
 
         if self.source:
@@ -273,6 +279,7 @@ class PlanarPushingPlanner:
         slider_pose: PlanarPose,
         initial_or_final: Literal["initial", "final"],
         collision_free_region: Optional["PolytopeContactLocation"] = None,
+        soft_source_node_pose_constraint: bool = False,
     ) -> VertexModePair:
         set_slider_pose = True
         terminal_cost = False
@@ -285,6 +292,7 @@ class PlanarPushingPlanner:
             set_slider_pose=set_slider_pose,
             terminal_cost=terminal_cost,
             collision_free_region=collision_free_region,
+            soft_source_node_pose_constraint=soft_source_node_pose_constraint,
         )
 
         vertex = self.gcs.AddVertex(mode.get_convex_set(), mode.name)
@@ -549,13 +557,17 @@ class PlanarPushingPlanner:
     def plan_path(
         self, solver_params: PlanarSolverParams, active_vertices: Optional[List[str]] = None, store_result: bool = True
     ) -> Optional[PlanarPushingPath]:
+        start = time.time()
         paths = self._plan_paths(solver_params, active_vertices, store_result=store_result)
+        print(f"    =====================================> _plan_paths time: {time.time() - start}")
 
         if paths is None:
             return None
 
         # Perform rounding to get feasible paths
+        start = time.time()
         feasible_paths = self._get_rounded_paths(solver_params, paths)
+        print(f"    =====================================> _get_rounded_paths time: {time.time() - start}")
         if feasible_paths is None:
             print("*" * 60 + "\nWARNING: Rounding returned no feasible paths!\n" + "*" * 60)
             return None

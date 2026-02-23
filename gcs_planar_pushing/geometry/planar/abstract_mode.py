@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import List, Literal, Optional
 
 import numpy as np
@@ -141,6 +141,7 @@ class AbstractContactMode(ABC):
     time_in_mode: float
     contact_location: PolytopeContactLocation
     config: PlanarPlanConfig
+    prog: MathematicalProgram = field(init=False)
 
     @abstractmethod
     def get_convex_set(self, make_bounded: bool) -> opt.ConvexSet:
