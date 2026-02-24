@@ -1026,3 +1026,42 @@ class PlanarPushingTrajectory(AbstractPlanarPushingTrajectory):
             plt.close()
 
         return ax
+
+    def get_slice(self, start_time: float) -> "PlanarPushingTrajectory":
+        """
+        Returns a new trajectory that is a slice of the current trajectory starting from start_time.
+        """
+        return SlicedPlanarPushingTrajectory(self, start_time)
+
+
+class SlicedPlanarPushingTrajectory(PlanarPushingTrajectory):
+    def __init__(self, original_traj: PlanarPushingTrajectory, start_time: float):
+        self._original_traj = original_traj
+        self._slice_start_time = start_time
+        # We don't call super().__init__ to avoid processing knot points
+        # We manually set what's needed
+        self._config = original_traj.config
+
+    @property
+    def config(self) -> PlanarPlanConfig:
+        return self._config
+
+    @property
+    def start_time(self) -> float:
+        return 0.0
+
+    @property
+    def end_time(self) -> float:
+        return max(0.0, self._original_traj.end_time - self._slice_start_time)
+
+    def get_value(self, t: float, traj_to_get: str) -> npt.NDArray[np.float64] | float:
+        return self._original_traj.get_value(self._slice_start_time + t, traj_to_get)
+
+    def get_knot_point_value(self, t: float, traj_to_get: str) -> npt.NDArray[np.float64] | float:
+        return self._original_traj.get_knot_point_value(self._slice_start_time + t, traj_to_get)
+
+    def get_slider_velocity(self, t: float) -> npt.NDArray[np.float64]:
+        return self._original_traj.get_slider_velocity(self._slice_start_time + t)
+
+    def get_pusher_velocity(self, t: float) -> npt.NDArray[np.float64]:
+        return self._original_traj.get_pusher_velocity(self._slice_start_time + t)

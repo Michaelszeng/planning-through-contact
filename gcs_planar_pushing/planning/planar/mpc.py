@@ -62,9 +62,13 @@ class PlanarPushingMPC:
             self.original_path = path
             self.original_traj = path.to_traj()
             print(f"Original Path Mode Sequence: {[pair.vertex.name() for pair in self.original_path.pairs]}")
+            self.traj = self.original_path.to_traj()
         else:
             self.original_path = None
             self.original_traj = None
+            self.traj = None
+
+        self.traj_start_time = 0.0
 
         # Store "short" mode vertex, which is a copy of the original vertex in the GCS but with a shorter time to
         # account for the passage of time during MPC iterations.
@@ -78,6 +82,8 @@ class PlanarPushingMPC:
         all_pairs = self.planner._get_all_vertex_mode_pairs()
         self.original_path = PlanarPushingPath.load(filename, self.planner.gcs, all_pairs)
         self.original_traj = self.original_path.to_traj()
+        self.traj = self.original_traj
+        self.traj_start_time = 0.0
         self.current_segment_index = 0
         print(f"Original Path Mode Sequence: {[pair.vertex.name() for pair in self.original_path.pairs]}")
 
@@ -182,6 +188,9 @@ class PlanarPushingMPC:
                     and next_idx in candidates
                     and isinstance(self.original_path.pairs[next_idx].mode, NonCollisionMode)
                 ):
+                    print(
+                        f"Forcing transition to next mode bc remaining time in contact mode too small: {remaining_time}"
+                    )
                     segment_idx = next_idx
                 # Otherwise, continue in the contact mode.
                 else:
@@ -254,7 +263,7 @@ class PlanarPushingMPC:
     #     and returns the collision-free region for that mode.
     #     If multiple modes contain the state, uses time t to break ties.
     #     If no mode contains the state, fall back to the original planned mode at time t.
-
+    #
     #     If enforce_monotonic_progress is True, the function will only return a mode that is
     #     either the system's current mode or the one mode after the current mode.
     #     """
@@ -265,7 +274,7 @@ class PlanarPushingMPC:
     #             candidates.append(self.current_segment_index + 1)
     #     else:
     #         candidates = list(range(len(self.original_path.pairs)))  # All modes are candidates
-
+    #
     #     # Prune candidates based on whether we are in contact
     #     #   If we are in contact, we only consider face contact modes
     #     #   If we are not in contact, we only consider non-collision modes
@@ -279,38 +288,38 @@ class PlanarPushingMPC:
     #                 else isinstance(self.original_path.pairs[i].mode, NonCollisionMode)
     #             )
     #         ]
-
+    #
     #     # Find all candidate modes that the state *could* be in
     #     valid_indices = []
     #     for i in candidates:
     #         if self._is_state_in_mode(slider_pose, pusher_pose, self.original_path.pairs[i].mode):
     #             valid_indices.append(i)
-
+    #
     #     assert len(valid_indices) > 0, "No mode is valid for the current state somehow."
-
+    #
     #     # If only one mode is valid, use it
     #     if len(valid_indices) == 1:
     #         segment_idx = valid_indices[0]
-
+    #
     #     # If multiple modes are valid, pick the one that is closest in time
     #     else:
     #         print("WARNING: Multiple modes are valid for the current state. Picking the one that is closest in time.")
-
+    #
     #         def _time_dist(idx: int) -> float:
     #             seg_start_time = self.original_traj.start_time if idx == 0 else self.original_traj.end_times[idx - 1]
     #             seg_end_time = self.original_traj.end_times[idx]
-
+    #
     #             if t < seg_start_time:
     #                 return seg_start_time - t
     #             elif t > seg_end_time:
     #                 return t - seg_end_time
     #             else:
     #                 return 0.0  # t is inside the segment
-
+    #
     #         segment_idx = min(valid_indices, key=_time_dist)
-
+    #
     #     self.current_segment_index = segment_idx
-
+    #
     #     # Extract the region corresponding to the mode index found above
     #     mode = self.original_path.pairs[segment_idx].mode
     #     if isinstance(mode, FaceContactMode):
@@ -320,7 +329,7 @@ class PlanarPushingMPC:
     #         collision_free_region = PolytopeContactLocation(ContactLocation.FACE, region_idx)
     #     else:
     #         collision_free_region = mode.contact_location
-
+    #
     #     return segment_idx, collision_free_region
 
     def _get_closest_time_and_segment(
@@ -616,6 +625,29 @@ class PlanarPushingMPC:
             is_in_contact=is_in_contact,
         )
 
+        ################################################################################################################
+        ### THIS IS A HACKY (NON-MARKOVIAN) FIX:
+        ### If we are in the last 0.4s of the final contact mode, run the latter part of this mode open-loop to prevent
+        ### the optimization from creating crazy results.
+        if is_in_contact:
+            current_mode = self.original_path.pairs[segment_idx].mode
+            if isinstance(current_mode, FaceContactMode):
+                remaining_time = self._get_remaining_time_in_current_mode(t)
+
+                # Check if this is the last contact mode
+                is_last_contact_mode = True
+                for i in range(segment_idx + 1, len(self.original_path.pairs)):
+                    if isinstance(self.original_path.pairs[i].mode, FaceContactMode):
+                        is_last_contact_mode = False
+                        break
+
+                if is_last_contact_mode and remaining_time <= 0.4 + 1e-3:
+                    print(
+                        f"Remaining time in last contact mode {remaining_time:.4f} <= 0.4s. Returning slice of original traj."
+                    )
+                    return self.traj.get_slice(t - self.traj_start_time)
+        ################################################################################################################
+
         mode_sequence = self._get_remaining_mode_sequence(segment_idx=segment_idx)
         print(f"    Mode sequence: {mode_sequence}")
 
@@ -628,31 +660,34 @@ class PlanarPushingMPC:
             mode_sequence,
             current_pusher_velocity,
             collision_free_region=collision_free_region,
-            soft_source_node_pose_constraint=soft_source_node_pose_constraint if is_in_contact else False,
+            # soft_source_node_pose_constraint=soft_source_node_pose_constraint if is_in_contact else False,
+            soft_source_node_pose_constraint=True,
         )
 
         path = self.planner.plan_path(
             self.solver_params, active_vertices=mode_sequence, store_result=False, rounded=rounded
         )
+        self.traj = path.to_traj(rounded=True)
+        self.traj_start_time = t
 
         # Save outputs if requested
         if path is not None and (save_video or save_traj or save_unrounded_video) and output_folder:
             os.makedirs(output_folder, exist_ok=True)
 
-            traj = path.to_traj(rounded=rounded)
+            rounded_traj = path.to_traj(rounded=True)
 
             if save_traj:
                 trajectory_folder = f"{output_folder}/{output_name}/trajectory"
                 os.makedirs(trajectory_folder, exist_ok=True)
 
-                if traj is not None:
-                    traj.save(f"{trajectory_folder}/traj.pkl")
+                if rounded_traj is not None:
+                    rounded_traj.save(f"{trajectory_folder}/traj.pkl")
 
                 slider_color = COLORS["aquamarine4"].diffuse()
 
-                if traj is not None:
+                if rounded_traj is not None:
                     make_traj_figure(
-                        traj,
+                        rounded_traj,
                         filename=f"{trajectory_folder}/traj",
                         slider_color=slider_color,
                         split_on_mode_type=True,
@@ -672,15 +707,15 @@ class PlanarPushingMPC:
                     new_pusher_color = COLORS["firebrick3"]
                     overlay_trajs_arg = [
                         (self.original_traj, original_slider_color, original_pusher_color),
-                        (traj, new_slider_color, new_pusher_color),
+                        (rounded_traj, new_slider_color, new_pusher_color),
                     ]
 
                 if save_video:
-                    if traj is not None:
+                    if rounded_traj is not None:
                         os.makedirs(f"{output_folder}", exist_ok=True)
 
                         visualize_planar_pushing_trajectory(
-                            traj,
+                            rounded_traj,
                             save=True,
                             filename=f"{output_folder}/{output_name}",
                             visualize_knot_points=not interpolate_video,
@@ -712,4 +747,4 @@ class PlanarPushingMPC:
                         )
                         print(f"Saved unrounded video to {output_folder}/{output_name}_unrounded")
 
-        return path
+        return self.traj

@@ -568,7 +568,7 @@ class PlanarPushingPlanner:
         if paths is None:
             return None
 
-        # Perform rounding to get feasible paths
+        # Perform rounding to get feasible paths. This stores the rounded result in the path objects.
         # Note: even if rounded is False, we still compute the rounded path and save it for plotting/debugging
         start = time.time()
         feasible_paths = self._get_rounded_paths(solver_params, paths)

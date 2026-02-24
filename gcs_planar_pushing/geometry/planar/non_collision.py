@@ -207,13 +207,15 @@ class NonCollisionMode(AbstractContactMode):
             terminal_cost=terminal_cost,
             time_in_mode=1e-6,  # zero time in source and target
         )
-        if set_slider_pose:
-            mode.set_slider_pose(slider_pose_world)
 
         if initial_or_final == "initial":
             mode.set_finger_initial_pose(pusher_pose_body, soft_source_node_pose_constraint)
+            if set_slider_pose:
+                mode.set_slider_pose(slider_pose_world, soft=False)
         else:  # final
             mode.set_finger_final_pose(pusher_pose_body)
+            if set_slider_pose:
+                mode.set_slider_pose(slider_pose_world, soft=True)  # Soft final slider pose constraint
 
         return mode
 
@@ -363,18 +365,18 @@ class NonCollisionMode(AbstractContactMode):
             self.prog.AddLinearConstraint(self.variables.sin_th == np.sin(pose.theta))
             self.prog.AddLinearConstraint(eq(self.variables.p_WB, pose.pos()))
         else:
-            W_POS = 1e8
-            W_ANG = 1e8
+            W_POS = 1e10
+            W_ANG = 1e10
             EPS_POS = 0.010
             EPS_ANG = 0.05
 
             cos_t, sin_t = np.cos(pose.theta), np.sin(pose.theta)
 
-            # Bounding box around target to keep the convex set compact
-            self.prog.AddBoundingBoxConstraint(pose.x - EPS_POS, pose.x + EPS_POS, self.variables.p_WB_x)
-            self.prog.AddBoundingBoxConstraint(pose.y - EPS_POS, pose.y + EPS_POS, self.variables.p_WB_y)
-            self.prog.AddBoundingBoxConstraint(cos_t - EPS_ANG, cos_t + EPS_ANG, self.variables.cos_th)
-            self.prog.AddBoundingBoxConstraint(sin_t - EPS_ANG, sin_t + EPS_ANG, self.variables.sin_th)
+            # # Bounding box around target to keep the convex set compact
+            # self.prog.AddBoundingBoxConstraint(pose.x - EPS_POS, pose.x + EPS_POS, self.variables.p_WB_x)
+            # self.prog.AddBoundingBoxConstraint(pose.y - EPS_POS, pose.y + EPS_POS, self.variables.p_WB_y)
+            # self.prog.AddBoundingBoxConstraint(cos_t - EPS_ANG, cos_t + EPS_ANG, self.variables.cos_th)
+            # self.prog.AddBoundingBoxConstraint(sin_t - EPS_ANG, sin_t + EPS_ANG, self.variables.sin_th)
 
             # Quadratic cost on position error: W_POS * ||p - p_target||^2
             pos_vars = np.array([self.variables.p_WB_x, self.variables.p_WB_y])
@@ -396,10 +398,29 @@ class NonCollisionMode(AbstractContactMode):
         if not soft_source_node_pose_constraint:
             self.prog.AddLinearConstraint(eq(self.variables.p_BPs[0], pose.pos()))
         else:
-            A = 10000000 * np.eye(2)
-            b = -10000000 * pose.pos().flatten()
-            cost = self.prog.AddL2NormCost(A, b, self.variables.p_BPs[0].flatten())
-            self.l2_norm_costs.append(cost)
+            W = 1e12
+            EPS_XY = 0.001
+
+            p = pose.pos().flatten()
+
+            # Bounding box around finger initial pose to keep the convex set compact
+            # This constraint seems necessary; without it, the optimization outputs weird paths
+            self.prog.AddBoundingBoxConstraint(
+                p - np.array([EPS_XY, EPS_XY]),
+                p + np.array([EPS_XY, EPS_XY]),
+                self.variables.p_BPs[0].flatten(),
+            )
+
+            # # Add cost on finger initial pose error
+            # A = 1e7 * np.eye(2)
+            # b = -1e7 * p
+            # cost = self.prog.AddL2NormCost(A, b, self.variables.p_BPs[0].flatten())
+            # self.l2_norm_costs.append(cost)
+
+            Q = 2 * W * np.eye(2)
+            b = -2 * W * p
+            c = W * p @ p
+            self.prog.AddQuadraticCost(Q, b, c, self.variables.p_BPs[0].flatten(), is_convex=True)
 
     def set_finger_final_pose(self, pose: PlanarPose) -> None:
         """
