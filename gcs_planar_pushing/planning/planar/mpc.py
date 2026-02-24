@@ -74,6 +74,7 @@ class PlanarPushingMPC:
         # account for the passage of time during MPC iterations.
         self.previous_short_mode_vertex = None  # Optional[GcsVertex]
         self.current_segment_index = 0
+        self._was_in_contact = False
 
     def load_original_path(self, filename: str) -> None:
         """
@@ -482,35 +483,27 @@ class PlanarPushingMPC:
                         )
 
                     if new_mode is not None:
-                        # Enforce initial velocity constraint if applicable
-                        if current_pusher_velocity is not None:
+                        # Enforce initial velocity constraint only if previous re-plan cycle was NOT in contact; coming
+                        # out of contact, velocity points into the slider --> pushes 2nd control point into collision.
+                        if (
+                            current_pusher_velocity is not None
+                            and not self._was_in_contact
+                            and isinstance(new_mode, NonCollisionMode)
+                        ):
                             R_WB = current_slider_pose.two_d_rot_matrix()
-                            # pusher velocity in world frame, expressed in slider body frame
                             v_WP_B = R_WB.T @ current_pusher_velocity
 
-                            if isinstance(new_mode, NonCollisionMode):
-                                # (slider is static during non-collision mode)
+                            decision_vars = new_mode.variables
+                            assert isinstance(decision_vars, NonCollisionVariables)
+                            c0_x = decision_vars.p_BP_xs[0]
+                            c0_y = decision_vars.p_BP_ys[0]
+                            c1_x = decision_vars.p_BP_xs[1]
+                            c1_y = decision_vars.p_BP_ys[1]
 
-                                # Velocity constraint for Bezier curve:
-                                # For a Bezier curve of degree n parameterized over [0, T]:
-                                #   dB/dt |_{t=0} = n/T * (P1 - P0)
-                                # So to achieve initial velocity v_WP_B:
-                                #   v_WP_B = order / time_in_mode * (c1 - c0)
-                                #   c1 - c0 = v_WP_B * time_in_mode / order
-                                decision_vars = new_mode.variables
-                                assert isinstance(decision_vars, NonCollisionVariables)
-                                c0_x = decision_vars.p_BP_xs[0]  # 1st control point x
-                                c0_y = decision_vars.p_BP_ys[0]  # 1st control point y
-                                c1_x = decision_vars.p_BP_xs[1]  # 2nd control point x
-                                c1_y = decision_vars.p_BP_ys[1]  # 2nd control point y
-
-                                order = decision_vars.num_knot_points - 1
-                                scale = decision_vars.time_in_mode / order
-                                new_mode.prog.AddLinearEqualityConstraint(c1_x - c0_x == v_WP_B[0] * scale)
-                                new_mode.prog.AddLinearEqualityConstraint(c1_y - c0_y == v_WP_B[1] * scale)
-                            # We do not enforce velocity constraints for face contact modes because
-                            # face contact modes are parameterized by piecewise first-order-hold curves
-                            # which are internally discontinuous anyway.
+                            order = decision_vars.num_knot_points - 1
+                            scale = decision_vars.time_in_mode / order
+                            new_mode.prog.AddLinearEqualityConstraint(c1_x - c0_x == v_WP_B[0] * scale)
+                            new_mode.prog.AddLinearEqualityConstraint(c1_y - c0_y == v_WP_B[1] * scale)
 
                         # Add to graph
                         new_vertex = self.planner.gcs.AddVertex(new_mode.get_convex_set(), new_mode.name)
@@ -645,6 +638,7 @@ class PlanarPushingMPC:
                     print(
                         f"Remaining time in last contact mode {remaining_time:.4f} <= 0.4s. Returning slice of original traj."
                     )
+                    self._was_in_contact = is_in_contact
                     return self.traj.get_slice(t - self.traj_start_time)
         ################################################################################################################
 
@@ -747,4 +741,5 @@ class PlanarPushingMPC:
                         )
                         print(f"Saved unrounded video to {output_folder}/{output_name}_unrounded")
 
+        self._was_in_contact = is_in_contact
         return self.traj

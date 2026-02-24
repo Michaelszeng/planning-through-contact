@@ -373,6 +373,7 @@ class NonCollisionMode(AbstractContactMode):
             cos_t, sin_t = np.cos(pose.theta), np.sin(pose.theta)
 
             # # Bounding box around target to keep the convex set compact
+            # # Doesn't seem to be necessary
             # self.prog.AddBoundingBoxConstraint(pose.x - EPS_POS, pose.x + EPS_POS, self.variables.p_WB_x)
             # self.prog.AddBoundingBoxConstraint(pose.y - EPS_POS, pose.y + EPS_POS, self.variables.p_WB_y)
             # self.prog.AddBoundingBoxConstraint(cos_t - EPS_ANG, cos_t + EPS_ANG, self.variables.cos_th)
