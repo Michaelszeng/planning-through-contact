@@ -397,6 +397,11 @@ class PlanarPushingMPC:
         if len(mode_sequence) == 0 or mode_sequence[0] != "source":
             mode_sequence.insert(0, "source")
 
+        # Ensure the last mode is "target" (if it was the target in the original path)
+        # The original path's last element is always the target.
+        if len(mode_sequence) > 0:
+            mode_sequence[-1] = "target"
+
         return mode_sequence
 
     def _update_initial_poses(
@@ -504,6 +509,8 @@ class PlanarPushingMPC:
                             scale = decision_vars.time_in_mode / order
                             new_mode.prog.AddLinearEqualityConstraint(c1_x - c0_x == v_WP_B[0] * scale)
                             new_mode.prog.AddLinearEqualityConstraint(c1_y - c0_y == v_WP_B[1] * scale)
+                        # We do not enforce velocity constraints for face contact modes because face contact modes are
+                        # parameterized by piecewise first-order-hold curves which are internally discontinuous anyway.
 
                         # Add to graph
                         new_vertex = self.planner.gcs.AddVertex(new_mode.get_convex_set(), new_mode.name)
@@ -554,6 +561,22 @@ class PlanarPushingMPC:
                         # Update mode sequence in place so planner uses the new mode
                         mode_sequence[1] = new_mode.name
                         return
+
+    def _rebuild_target_for_slider_pose(self, current_slider_pose: PlanarPose) -> None:
+        """
+        Rebuild the target vertex so its body-frame pusher position gives the
+        correct world-frame pusher position for the given slider pose.
+        """
+        goal = self.planner.config.start_and_goal
+
+        # Remove the old target vertex and its edges
+        old_target = self.planner.target
+        old_name = old_target.vertex.name()
+        self.planner.gcs.RemoveVertex(old_target.vertex)
+        for k in [k for k in self.planner.edges if k[1] == old_name]:
+            del self.planner.edges[k]
+
+        self.planner._set_target_poses(goal.pusher_target_pose, current_slider_pose)
 
     def _get_remaining_time_in_current_mode(self, t: float) -> float:
         """
@@ -620,7 +643,7 @@ class PlanarPushingMPC:
 
         ################################################################################################################
         ### THIS IS A HACKY (NON-MARKOVIAN) FIX:
-        ### If we are in the last 0.4s of the final contact mode, run the latter part of this mode open-loop to prevent
+        ### If we are in the last 0.3s of the final contact mode, run the latter part of this mode open-loop to prevent
         ### the optimization from creating crazy results.
         if is_in_contact:
             current_mode = self.original_path.pairs[segment_idx].mode
@@ -634,9 +657,9 @@ class PlanarPushingMPC:
                         is_last_contact_mode = False
                         break
 
-                if is_last_contact_mode and remaining_time <= 0.4 + 1e-3:
+                if is_last_contact_mode and remaining_time <= 0.3 + 1e-3:
                     print(
-                        f"Remaining time in last contact mode {remaining_time:.4f} <= 0.4s. Returning slice of original traj."
+                        f"Remaining time in last contact mode {remaining_time:.4f} <= 0.3s. Returning slice of original traj."
                     )
                     self._was_in_contact = is_in_contact
                     return self.traj.get_slice(t - self.traj_start_time)
@@ -647,6 +670,17 @@ class PlanarPushingMPC:
 
         self._update_mode_timing(t, segment_idx)
         print(f"    Current mode remaining t: {self.config.time_first_mode}")
+
+        ################################################################################################################
+        ### THIS IS A HACKY (NON-MARKOVIAN) FIX:
+        ### If no remaining contact modes, rebuild target so world-frame pusher position is correct
+        has_remaining_contact = any(
+            isinstance(self.original_path.pairs[i].mode, FaceContactMode)
+            for i in range(segment_idx, len(self.original_path.pairs))
+        )
+        if not has_remaining_contact:
+            self._rebuild_target_for_slider_pose(current_slider_pose)
+        ################################################################################################################
 
         self._update_initial_poses(
             current_slider_pose,

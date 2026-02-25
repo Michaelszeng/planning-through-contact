@@ -203,7 +203,7 @@ def get_default_plan_config(
             pusher_radius=pusher_radius,
             friction_coeff_slider_pusher=0.1,  # Slider uses mu=0.5, pusher uses mu=0.25
             friction_coeff_table_slider=0.5,
-            integration_constant=0.24,
+            integration_constant=0.2,
         )
         contact_cost = get_default_contact_cost()
         non_collision_cost = get_default_non_collision_cost()
