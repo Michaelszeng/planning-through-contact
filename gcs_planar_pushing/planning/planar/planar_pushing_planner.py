@@ -266,11 +266,16 @@ class PlanarPushingPlanner:
         self,
         pusher_pose: PlanarPose,
         slider_pose: PlanarPose,
+        soft_slider_target_constraint: bool = False,
     ) -> None:
         if self.config.allow_teleportation or not self.config.use_entry_and_exit_subgraphs:
-            self.target = self._add_single_source_or_target(pusher_pose, slider_pose, "final")
+            self.target = self._add_single_source_or_target(
+                pusher_pose, slider_pose, "final", soft_slider_target_constraint=soft_slider_target_constraint
+            )
         else:
-            self.target_subgraph.set_final_poses(pusher_pose, slider_pose)
+            self.target_subgraph.set_final_poses(
+                pusher_pose, slider_pose, soft_slider_target_constraint=soft_slider_target_constraint
+            )
             self.target = self.target_subgraph.target
 
     def _add_single_source_or_target(
@@ -280,6 +285,7 @@ class PlanarPushingPlanner:
         initial_or_final: Literal["initial", "final"],
         collision_free_region: Optional["PolytopeContactLocation"] = None,
         soft_source_node_pose_constraint: bool = False,
+        soft_slider_target_constraint: bool = False,
     ) -> VertexModePair:
         set_slider_pose = True
         terminal_cost = False
@@ -293,6 +299,7 @@ class PlanarPushingPlanner:
             terminal_cost=terminal_cost,
             collision_free_region=collision_free_region,
             soft_source_node_pose_constraint=soft_source_node_pose_constraint,
+            soft_slider_target_constraint=soft_slider_target_constraint,
         )
 
         vertex = self.gcs.AddVertex(mode.get_convex_set(), mode.name)

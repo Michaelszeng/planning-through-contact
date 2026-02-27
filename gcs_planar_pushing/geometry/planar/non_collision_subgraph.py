@@ -173,6 +173,7 @@ class NonCollisionSubGraph:
         initial_or_final: Literal["initial", "final"],
         collision_free_region: Optional[PolytopeContactLocation] = None,
         soft_source_node_pose_constraint: bool = False,
+        soft_slider_target_constraint: bool = False,
     ) -> None:
         mode = NonCollisionMode.create_source_or_target_mode(
             self.config,
@@ -181,6 +182,7 @@ class NonCollisionSubGraph:
             initial_or_final,
             collision_free_region=collision_free_region,
             soft_source_node_pose_constraint=soft_source_node_pose_constraint,
+            soft_slider_target_constraint=soft_slider_target_constraint,
         )
         vertex = self.gcs.AddVertex(mode.get_convex_set(), mode.name)
 
@@ -212,8 +214,15 @@ class NonCollisionSubGraph:
         pusher_final_pose: PlanarPose,
         slider_final_pose: PlanarPose,
         collision_free_region: Optional[PolytopeContactLocation] = None,
+        soft_slider_target_constraint: bool = False,
     ) -> None:
-        self._set_initial_or_final_poses(pusher_final_pose, slider_final_pose, "final", collision_free_region)
+        self._set_initial_or_final_poses(
+            pusher_final_pose,
+            slider_final_pose,
+            "final",
+            collision_free_region,
+            soft_slider_target_constraint=soft_slider_target_constraint,
+        )
 
     def get_all_vertex_mode_pairs(self) -> Dict[str, VertexModePair]:
         all_pairs = {

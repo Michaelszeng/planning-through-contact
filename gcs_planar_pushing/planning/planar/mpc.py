@@ -562,10 +562,17 @@ class PlanarPushingMPC:
                         mode_sequence[1] = new_mode.name
                         return
 
-    def _rebuild_target_for_slider_pose(self, current_slider_pose: PlanarPose, last_mode_name: str) -> None:
+    def _rebuild_target_node(
+        self,
+        target_slider_pose: PlanarPose,
+        last_mode_name: Optional[str] = None,
+        soft_slider_target_constraint: bool = True,
+    ) -> None:
         """
-        Rebuild the target vertex so its body-frame pusher position gives the
+        This function serves two purposes:
+        1. Rebuild the target vertex so its body-frame pusher position gives the
         correct world-frame pusher position for the given slider pose.
+        2. Rebuild the target vertex so it has soft constraints on slider target pose.
         """
         goal = self.planner.config.start_and_goal
 
@@ -576,19 +583,22 @@ class PlanarPushingMPC:
         for k in [k for k in self.planner.edges if k[1] == old_name]:
             del self.planner.edges[k]
 
-        self.planner._set_target_poses(goal.pusher_target_pose, current_slider_pose)
+        self.planner._set_target_poses(
+            goal.pusher_target_pose, target_slider_pose, soft_slider_target_constraint=soft_slider_target_constraint
+        )
 
         # Connect the last mode in the active path to the new target
-        all_pairs = self.planner._get_all_vertex_mode_pairs()
-        last_pair = all_pairs[last_mode_name]
-        target_name = self.planner.target.vertex.name()
-        self.planner.edges[(last_mode_name, target_name)] = gcs_add_edge_with_continuity(
-            self.planner.gcs,
-            last_pair,
-            self.planner.target,
-            only_continuity_on_slider=False,
-            continuity_on_pusher_velocities=False,
-        )
+        if last_mode_name is not None:
+            all_pairs = self.planner._get_all_vertex_mode_pairs()
+            last_pair = all_pairs[last_mode_name]
+            target_name = self.planner.target.vertex.name()
+            self.planner.edges[(last_mode_name, target_name)] = gcs_add_edge_with_continuity(
+                self.planner.gcs,
+                last_pair,
+                self.planner.target,
+                only_continuity_on_slider=False,
+                continuity_on_pusher_velocities=False,
+            )
 
         self.original_path.pairs[-1] = self.planner.target
 
@@ -692,9 +702,14 @@ class PlanarPushingMPC:
             isinstance(self.original_path.pairs[i].mode, FaceContactMode)
             for i in range(segment_idx, len(self.original_path.pairs))
         )
+        last_mode_name = mode_sequence[-2]
         if not has_remaining_contact:
-            last_mode_name = mode_sequence[-2]
-            self._rebuild_target_for_slider_pose(current_slider_pose, last_mode_name)
+            self._rebuild_target_node(current_slider_pose, last_mode_name, soft_slider_target_constraint=True)
+        else:
+            # Rebuild target node with soft constraints for future re-plans
+            self._rebuild_target_node(
+                self.config.start_and_goal.slider_target_pose, last_mode_name, soft_slider_target_constraint=True
+            )
         ################################################################################################################
 
         self._update_initial_poses(

@@ -1,3 +1,5 @@
+import time
+
 from gcs_planar_pushing.experiments.utils import get_default_plan_config, get_default_solver_params
 from gcs_planar_pushing.geometry.planar.planar_pose import PlanarPose
 from gcs_planar_pushing.planning.planar.planar_plan_config import PlanarPushingStartAndGoal
@@ -5,13 +7,16 @@ from gcs_planar_pushing.planning.planar.utils import create_plan
 
 solver_params = get_default_solver_params()
 
-slider_initial_pose = PlanarPose(0.14, 0.05, -0.8)
 slider_type = "arbitrary"
 arbitrary_shape_pickle_path = "arbitrary_shape_pickles/small_t_pusher.pkl"
 
+# Initial poses
+slider_initial_pose = PlanarPose(0.49916350319441594, -0.039942707670509475, 3.0109461664097754)
+pusher_initial_pose = PlanarPose(0.587, 0.15, 0.0)
+
 # Target poses
-slider_target_pose = PlanarPose(0.0, 0.0, 0.0)
-pusher_target_pose = PlanarPose(-0.3, 0, 0)
+slider_target_pose = PlanarPose(0.587, -0.0355, 0.0)
+pusher_target_pose = PlanarPose(0.587, 0.15, 0)
 
 config = get_default_plan_config(
     slider_type=slider_type, arbitrary_shape_pickle_path=arbitrary_shape_pickle_path, use_case="drake_iiwa"
@@ -19,13 +24,14 @@ config = get_default_plan_config(
 start_and_goal = PlanarPushingStartAndGoal(
     slider_initial_pose=slider_initial_pose,
     slider_target_pose=slider_target_pose,
-    pusher_initial_pose=PlanarPose(-0.3, 0, 0),
+    pusher_initial_pose=pusher_initial_pose,
     pusher_target_pose=pusher_target_pose,
 )
 
 print(f"Starting planning for slider type: {slider_type}")
 
 # create_plan handles planning, folder creation, trajectory saving, and visualization
+start = time.time()
 result = create_plan(
     start_and_target=start_and_goal,
     config=config,
@@ -38,7 +44,7 @@ result = create_plan(
     save_traj=True,
     debug=True,
 )
-
+print(f"Time taken for create_plan: {time.time() - start}")
 
 # # Run create_plan with the mode-sequence fixed
 # from gcs_planar_pushing.planning.planar.mpc import PlanarPushingMPC

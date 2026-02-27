@@ -19,7 +19,8 @@ slider_type = "arbitrary"
 arbitrary_shape_pickle_path = "arbitrary_shape_pickles/small_t_pusher.pkl"
 
 # Initial poses
-slider_initial_pose = PlanarPose(0.49916350319441594, -0.039942707670509475, 3.0109461664097754)
+slider_initial_pose = PlanarPose(0.649973205950237, -0.016820301165871604, -2.1917248908936977)
+# slider_initial_pose = PlanarPose(0.49916350319441594, -0.039942707670509475, 3.0109461664097754)
 pusher_initial_pose = PlanarPose(0.587, 0.15, 0.0)
 
 # Target poses
@@ -38,12 +39,15 @@ start_and_goal = PlanarPushingStartAndGoal(
 
 print("Constructing MPC Planner...")
 
-t = 5
-is_in_contact = True  # Whether the system is in contact with the slider at time t
-current_segment_index = 2  # The segment index that the system is currently in at/before time t
+# t = 5
+# is_in_contact = True  # Whether the system is in contact with the slider at time t
+# current_segment_index = 2  # The segment index that the system is currently in at/before time t
+t = 0
+is_in_contact = False  # Whether the system is in contact with the slider at time t
+current_segment_index = 0  # The segment index that the system is currently in at/before time t
 
 # Load original plan from cache if it exists to speed up testing
-CACHE_PATH = f"mpc_path_cache_t={t}.pkl"
+CACHE_PATH = f"mpc_path_cache_slider_initial_pose={slider_initial_pose.x},{slider_initial_pose.y},{slider_initial_pose.theta}_t={t}.pkl"
 if os.path.exists(CACHE_PATH):
     print(f"Loading cached path from {CACHE_PATH}")
     mpc = PlanarPushingMPC(
@@ -89,7 +93,7 @@ path = mpc.plan(
     is_in_contact=is_in_contact,
     enforce_monotonic_progress=True,
     output_folder="trajectories_mpc",
-    output_name=f"arbitrary_small_t_pusher_trajectory_t={t}",
+    output_name=f"arbitrary_small_t_pusher_trajectory_slider_initial_pose={slider_initial_pose.x},{slider_initial_pose.y},{slider_initial_pose.theta}_t={t}",
     save_video=True,
     interpolate_video=True,
     overlay_traj=True,

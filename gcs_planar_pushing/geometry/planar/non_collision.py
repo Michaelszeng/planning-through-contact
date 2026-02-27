@@ -183,6 +183,7 @@ class NonCollisionMode(AbstractContactMode):
         terminal_cost: bool = False,
         collision_free_region: Optional[PolytopeContactLocation] = None,
         soft_source_node_pose_constraint: bool = False,
+        soft_slider_target_constraint: bool = False,
     ) -> "NonCollisionMode":
         p_WP = pusher_pose_world.pos()
         R_WB = slider_pose_world.two_d_rot_matrix()
@@ -215,7 +216,7 @@ class NonCollisionMode(AbstractContactMode):
         else:  # final
             mode.set_finger_final_pose(pusher_pose_body)
             if set_slider_pose:
-                mode.set_slider_pose(slider_pose_world, soft=True)  # Soft final slider pose constraint
+                mode.set_slider_pose(slider_pose_world, soft=soft_slider_target_constraint)
 
         return mode
 
@@ -365,19 +366,18 @@ class NonCollisionMode(AbstractContactMode):
             self.prog.AddLinearConstraint(self.variables.sin_th == np.sin(pose.theta))
             self.prog.AddLinearConstraint(eq(self.variables.p_WB, pose.pos()))
         else:
-            W_POS = 1e10
-            W_ANG = 1e10
-            EPS_POS = 0.010
-            EPS_ANG = 0.05
+            W_POS = 1e5
+            W_ANG = 1e5
+            EPS_POS = 0.015
+            EPS_ANG = 0.075
 
             cos_t, sin_t = np.cos(pose.theta), np.sin(pose.theta)
 
-            # # Bounding box around target to keep the convex set compact
-            # # Doesn't seem to be necessary
-            # self.prog.AddBoundingBoxConstraint(pose.x - EPS_POS, pose.x + EPS_POS, self.variables.p_WB_x)
-            # self.prog.AddBoundingBoxConstraint(pose.y - EPS_POS, pose.y + EPS_POS, self.variables.p_WB_y)
-            # self.prog.AddBoundingBoxConstraint(cos_t - EPS_ANG, cos_t + EPS_ANG, self.variables.cos_th)
-            # self.prog.AddBoundingBoxConstraint(sin_t - EPS_ANG, sin_t + EPS_ANG, self.variables.sin_th)
+            # Bounding box around target to keep the convex set compact
+            self.prog.AddBoundingBoxConstraint(pose.x - EPS_POS, pose.x + EPS_POS, self.variables.p_WB_x)
+            self.prog.AddBoundingBoxConstraint(pose.y - EPS_POS, pose.y + EPS_POS, self.variables.p_WB_y)
+            self.prog.AddBoundingBoxConstraint(cos_t - EPS_ANG, cos_t + EPS_ANG, self.variables.cos_th)
+            self.prog.AddBoundingBoxConstraint(sin_t - EPS_ANG, sin_t + EPS_ANG, self.variables.sin_th)
 
             # Quadratic cost on position error: W_POS * ||p - p_target||^2
             pos_vars = np.array([self.variables.p_WB_x, self.variables.p_WB_y])
@@ -399,7 +399,7 @@ class NonCollisionMode(AbstractContactMode):
         if not soft_source_node_pose_constraint:
             self.prog.AddLinearConstraint(eq(self.variables.p_BPs[0], pose.pos()))
         else:
-            W = 1e12
+            W = 1e6
             EPS_XY = 0.001
 
             p = pose.pos().flatten()
