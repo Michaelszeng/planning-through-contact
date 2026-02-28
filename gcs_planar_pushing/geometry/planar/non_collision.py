@@ -45,23 +45,40 @@ def check_finger_pose_in_contact_location(
     finger_pose: PlanarPose,
     loc: PolytopeContactLocation,
     config: PlanarPlanConfig,
+    soft_source_node_pose_constraint: bool = False,
 ) -> bool:
     mode = NonCollisionMode.create_from_plan_spec(loc, config, one_knot_point=True)
 
-    mode.set_finger_initial_pose(finger_pose)
+    # Important: when selecting a source/target collision-free region we may want to tolerate
+    # slight penetration / contact and allow the optimizer to shift the pose within a small
+    # neighborhood (soft source node constraint).
+    mode.set_finger_initial_pose(finger_pose, soft_source_node_pose_constraint)
 
     result = Solve(mode.prog)
     return result.is_success()
 
 
-def find_first_matching_location(finger_pose: PlanarPose, config: PlanarPlanConfig) -> PolytopeContactLocation:
+def find_first_matching_location(
+    finger_pose: PlanarPose,
+    config: PlanarPlanConfig,
+    soft_source_node_pose_constraint: bool = False,
+) -> PolytopeContactLocation:
     # we always add all non-collision modes, even when we don't add all contact modes
     # (think of maneuvering around the object etc)
     locations = [
         PolytopeContactLocation(ContactLocation.FACE, idx)
         for idx in range(config.slider_geometry.num_collision_free_regions)
     ]
-    matching_locs = [loc for loc in locations if check_finger_pose_in_contact_location(finger_pose, loc, config)]
+    matching_locs = [
+        loc
+        for loc in locations
+        if check_finger_pose_in_contact_location(
+            finger_pose,
+            loc,
+            config,
+            soft_source_node_pose_constraint=soft_source_node_pose_constraint,
+        )
+    ]
     if len(matching_locs) == 0:
         raise ValueError("No valid configurations found for specified initial or target poses")
     return matching_locs[0]
@@ -198,7 +215,11 @@ class NonCollisionMode(AbstractContactMode):
             loc = collision_free_region
         else:
             # Search for the first collision-free region/mode that the source/target is in
-            loc = find_first_matching_location(pusher_pose_body, config)
+            loc = find_first_matching_location(
+                pusher_pose_body,
+                config,
+                soft_source_node_pose_constraint=soft_source_node_pose_constraint,
+            )
         mode_name = "source" if initial_or_final == "initial" else "target"
         mode = cls.create_from_plan_spec(
             loc,
@@ -359,17 +380,17 @@ class NonCollisionMode(AbstractContactMode):
 
                 self.distance_to_object_socp_constraints.extend(constraints_for_knot_point)
 
-    def set_slider_pose(self, pose: PlanarPose, soft: bool = True) -> None:
+    def set_slider_pose(self, pose: PlanarPose, soft: bool = False) -> None:
         self.slider_pose = pose
         if not soft:
             self.prog.AddLinearConstraint(self.variables.cos_th == np.cos(pose.theta))
             self.prog.AddLinearConstraint(self.variables.sin_th == np.sin(pose.theta))
             self.prog.AddLinearConstraint(eq(self.variables.p_WB, pose.pos()))
         else:
-            W_POS = 1e5
-            W_ANG = 1e5
-            EPS_POS = 0.015
-            EPS_ANG = 0.075
+            W_POS = 1e6
+            W_ANG = 1e4
+            EPS_POS = float(getattr(self.config, "soft_slider_target_eps_pos", 0.015))
+            EPS_ANG = float(getattr(self.config, "soft_slider_target_eps_ang", 0.075))
 
             cos_t, sin_t = np.cos(pose.theta), np.sin(pose.theta)
 
@@ -399,8 +420,8 @@ class NonCollisionMode(AbstractContactMode):
         if not soft_source_node_pose_constraint:
             self.prog.AddLinearConstraint(eq(self.variables.p_BPs[0], pose.pos()))
         else:
-            W = 1e6
-            EPS_XY = 0.001
+            W = 1e7
+            EPS_XY = 0.00125
 
             p = pose.pos().flatten()
 

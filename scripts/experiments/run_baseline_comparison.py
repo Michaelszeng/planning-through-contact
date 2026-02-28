@@ -315,9 +315,9 @@ def main() -> None:
             visualize_initial_guess=visualize_initial_guess,
         )
         if only_direct_trajopt:
-            gcs_solve_data = None
+            gcs_path = None
         else:
-            gcs_solve_data = create_plan(
+            gcs_path = create_plan(
                 plan,
                 gcs_config,
                 solver_params,
@@ -329,10 +329,10 @@ def main() -> None:
             lines = []
             if only_direct_trajopt:
                 gcs_cost = "not_run"
-            elif gcs_solve_data is None:
+            elif gcs_path is None:
                 gcs_cost = "infeasible"
             else:
-                gcs_cost = gcs_solve_data.feasible_cost
+                gcs_cost = gcs_path.rounded_cost if gcs_path.rounded_result is not None else "rounding_failed"
 
             lines.append(f"gcs_cost: {gcs_cost}")
 

@@ -536,8 +536,7 @@ class ArbitraryShape2D(CollisionGeometry):
         primitive_types = [box["name"] for box in boxes]
         assert np.all([t == "box" for t in primitive_types]), f"Only boxes are supported. Got: {primitive_types}"
 
-        # TODO: Take as input
-        # print(f"COM offset: {self.com_offset.flatten()}")
+        print(f"COM offset: {self.com_offset.flatten()}")
         x_com, y_com = self.com_offset.flatten()
         boxes = offset_boxes(boxes, [-x_com, -y_com])
 

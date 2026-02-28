@@ -101,11 +101,13 @@ def get_triangle() -> RigidBody:
 
 def get_default_contact_cost() -> ContactCost:
     contact_cost = ContactCost(
-        keypoint_arc_length=10.0,
+        keypoint_arc_length=1.0,
         force_regularization=100000.0,  # NOTE: This is multiplied by 1e-4 because we have forces in other units in the optimization problem
         keypoint_velocity_regularization=100.0,
         trace=None,
-        mode_transition_cost=None,
+        # mode_transition_cost=None,
+        mode_transition_cost=10.0,
+        angular_velocity_regularization=80.0,
         time=1.0,
     )
     return contact_cost
@@ -123,7 +125,7 @@ def get_default_non_collision_cost() -> NonCollisionCost:
 def get_hardware_contact_cost() -> ContactCost:
     """
     A custom cost for hardware,
-    which empically generates plans that respect robot velocity
+    which empirically generates plans that respect robot velocity
     limits etc.
     """
     contact_cost = ContactCost(
@@ -207,7 +209,7 @@ def get_default_plan_config(
         )
         contact_cost = get_default_contact_cost()
         non_collision_cost = get_default_non_collision_cost()
-        buffer_to_corners = 0.003
+        buffer_to_corners = 0.005
         contact_config = ContactConfig(cost=contact_cost, lam_min=buffer_to_corners, lam_max=1 - buffer_to_corners)
 
         time_contact = 4.0

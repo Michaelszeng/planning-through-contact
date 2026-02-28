@@ -419,14 +419,18 @@ def create_plan(
     debug: bool = False,
     hardware: bool = False,
     save_relaxed: bool = False,
-) -> Optional[SingleRunResult]:
+    planner: Optional[PlanarPushingPlanner] = None,
+) -> Optional[PlanarPushingPath]:
     """
     Creates a planar pushing plan.
 
     @param start_and_target: Starting and target configuration for the system.
     @param config: Config for the system and planner.
     @param solver_params: Parameters for the underlying optimization solver.
-    @param active_vertices: (Optional)Fixed mode sequence to use for planning.
+    @param active_vertices: (Optional) Fixed mode sequence to use for planning.
+    @param planner: (Optional) Pre-configured PlanarPushingPlanner to use instead of creating one.
+        When provided, planner setup (construction, start/goal assignment, formulate_problem) is
+        skipped and plan_path is called directly. debug/save_analysis modes are also skipped.
     """
     # Set up folders
     folder_name = f"{output_folder}/{output_name}"
@@ -438,17 +442,19 @@ def create_plan(
     if save_analysis or debug:
         os.makedirs(analysis_folder, exist_ok=True)
 
-    if debug:
-        visualize_planar_pushing_start_and_goal(
-            config.dynamics_config.slider.geometry,
-            config.dynamics_config.pusher_radius,
-            start_and_target,
-            # show=True,
-            save=True,
-            filename=f"{folder_name}/start_and_goal",
-        )
-
-    if debug or save_analysis:  # Run planning pipeline with returning data/metrics
+    if planner is not None:
+        path = planner.plan_path(solver_params, active_vertices)
+        solve_data = None
+    elif debug or save_analysis:  # Run planning pipeline with returning data/metrics
+        if debug:
+            visualize_planar_pushing_start_and_goal(
+                config.dynamics_config.slider.geometry,
+                config.dynamics_config.pusher_radius,
+                start_and_target,
+                # show=True,
+                save=True,
+                filename=f"{folder_name}/start_and_goal",
+            )
         solve_data = do_one_run_get_path(
             config,
             solver_params,
@@ -547,5 +553,4 @@ def create_plan(
                     lims=animation_lims,
                 )
 
-    if debug:
-        return solve_data
+    return path

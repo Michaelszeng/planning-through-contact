@@ -1,5 +1,5 @@
 import os
-from typing import List, Optional, Tuple
+from typing import List, Optional, Tuple, Union
 
 import numpy as np
 import numpy.typing as npt
@@ -23,6 +23,7 @@ from gcs_planar_pushing.geometry.planar.planar_pose import PlanarPose
 from gcs_planar_pushing.geometry.planar.planar_pushing_path import PlanarPushingPath
 from gcs_planar_pushing.geometry.planar.planar_pushing_trajectory import (
     NonCollisionTrajSegment,
+    StationaryPlanarPushingTrajectory,
 )
 from gcs_planar_pushing.planning.planar.planar_plan_config import (
     PlanarPlanConfig,
@@ -30,6 +31,7 @@ from gcs_planar_pushing.planning.planar.planar_plan_config import (
     PlanarSolverParams,
 )
 from gcs_planar_pushing.planning.planar.planar_pushing_planner import PlanarPushingPlanner
+from gcs_planar_pushing.planning.planar.utils import create_plan
 from gcs_planar_pushing.visualize.colors import COLORS
 from gcs_planar_pushing.visualize.planar_pushing import (
     make_traj_figure,
@@ -45,47 +47,82 @@ class PlanarPushingMPC:
         config: PlanarPlanConfig,
         start_and_goal: PlanarPushingStartAndGoal,
         solver_params: PlanarSolverParams,
+        planner_freq: float = 10.0,
+        double_plan: bool = False,  # Replan from scratch once in the non-collision mode after the last contact
         plan: bool = True,
+        output_folder: str = "",
+        output_name: str = "",
+        save_video: bool = False,
+        interpolate_video: bool = True,
     ):
         """
         Formulate initial GCS Problem and do full solve
         """
         self.config = config
         self.solver_params = solver_params
+        self.double_plan = double_plan
+        self.output_folder = output_folder
+        self.output_name = output_name
+        self.save_video = save_video
+        self.interpolate_video = interpolate_video
+
         self.planner = PlanarPushingPlanner(config)
         self.planner.config.start_and_goal = start_and_goal
         self.planner.formulate_problem()
 
         if plan:
-            path = self.planner.plan_path(solver_params, store_result=False)
+            print("*" * 50 + " CREATING INITIAL PATH " + "*" * 50)
+            path = create_plan(
+                start_and_target=start_and_goal,
+                config=config,
+                solver_params=solver_params,
+                planner=self.planner,
+                output_folder=output_folder,
+                output_name=output_name,
+                save_video=save_video,
+                interpolate_video=interpolate_video,
+                do_rounding=True,
+                save_traj=False,
+            )
+            print("*" * 123)
             assert path is not None
             self.original_path = path
             self.original_traj = path.to_traj()
             print(f"Original Path Mode Sequence: {[pair.vertex.name() for pair in self.original_path.pairs]}")
-            self.traj = self.original_path.to_traj()
+            self.traj = self.original_traj
         else:
+            # The caller should also call load_original_path() if `plan` is False.
             self.original_path = None
             self.original_traj = None
             self.traj = None
 
-        self.traj_start_time = 0.0
+        self.planner_freq = planner_freq
+
+        # Both times below are in **episode** (simulation-clock) time.
+        #
+        # Episode time when `original_traj` was created.  `original_traj` is parameterised from t=0,
+        # so to index into it we compute  t_episode - original_traj_epoch.
+        self.original_traj_epoch = 0.0
+        # Episode time when the latest `self.traj` was created (updated every MPC cycle).
+        # `self.traj` is also parameterised from t=0, so to index into it we compute
+        # t_episode - traj_epoch.
+        self.traj_epoch = 0.0
 
         # Store "short" mode vertex, which is a copy of the original vertex in the GCS but with a shorter time to
         # account for the passage of time during MPC iterations.
         self.previous_short_mode_vertex = None  # Optional[GcsVertex]
-        self.current_segment_index = 0
+        self.current_segment_index = 1  # Start at second mode to skip source node
         self._was_in_contact = False
 
     def load_original_path(self, filename: str) -> None:
-        """
-        Loads the original path from a file.
-        """
+        """Loads the original path from a file."""
         all_pairs = self.planner._get_all_vertex_mode_pairs()
         self.original_path = PlanarPushingPath.load(filename, self.planner.gcs, all_pairs)
         self.original_traj = self.original_path.to_traj()
         self.traj = self.original_traj
-        self.traj_start_time = 0.0
-        self.current_segment_index = 0
+        self.original_traj_epoch = 0.0
+        self.traj_epoch = 0.0
+        self.current_segment_index = 1  # Start at second mode to skip source node
         print(f"Original Path Mode Sequence: {[pair.vertex.name() for pair in self.original_path.pairs]}")
 
     def _is_state_in_mode(
@@ -250,88 +287,6 @@ class PlanarPushingMPC:
             collision_free_region = mode.contact_location
 
         return segment_idx, collision_free_region
-
-    # def _get_segment_and_region_from_state(
-    #     self,
-    #     slider_pose: PlanarPose,
-    #     pusher_pose: PlanarPose,
-    #     t: float,
-    #     enforce_monotonic_progress: bool = True,
-    #     is_in_contact: Optional[bool] = None,
-    # ) -> Tuple[int, PolytopeContactLocation]:
-    #     """
-    #     Finds the index of the mode in the original path that contains the current state,
-    #     and returns the collision-free region for that mode.
-    #     If multiple modes contain the state, uses time t to break ties.
-    #     If no mode contains the state, fall back to the original planned mode at time t.
-    #
-    #     If enforce_monotonic_progress is True, the function will only return a mode that is
-    #     either the system's current mode or the one mode after the current mode.
-    #     """
-    #     # Determine candidate modes
-    #     if enforce_monotonic_progress:  # Candidates only include current and next mode
-    #         candidates = [self.current_segment_index]
-    #         if self.current_segment_index + 1 < len(self.original_path.pairs):
-    #             candidates.append(self.current_segment_index + 1)
-    #     else:
-    #         candidates = list(range(len(self.original_path.pairs)))  # All modes are candidates
-    #
-    #     # Prune candidates based on whether we are in contact
-    #     #   If we are in contact, we only consider face contact modes
-    #     #   If we are not in contact, we only consider non-collision modes
-    #     if is_in_contact is not None:
-    #         candidates = [
-    #             i
-    #             for i in candidates
-    #             if (
-    #                 isinstance(self.original_path.pairs[i].mode, FaceContactMode)
-    #                 if is_in_contact
-    #                 else isinstance(self.original_path.pairs[i].mode, NonCollisionMode)
-    #             )
-    #         ]
-    #
-    #     # Find all candidate modes that the state *could* be in
-    #     valid_indices = []
-    #     for i in candidates:
-    #         if self._is_state_in_mode(slider_pose, pusher_pose, self.original_path.pairs[i].mode):
-    #             valid_indices.append(i)
-    #
-    #     assert len(valid_indices) > 0, "No mode is valid for the current state somehow."
-    #
-    #     # If only one mode is valid, use it
-    #     if len(valid_indices) == 1:
-    #         segment_idx = valid_indices[0]
-    #
-    #     # If multiple modes are valid, pick the one that is closest in time
-    #     else:
-    #         print("WARNING: Multiple modes are valid for the current state. Picking the one that is closest in time.")
-    #
-    #         def _time_dist(idx: int) -> float:
-    #             seg_start_time = self.original_traj.start_time if idx == 0 else self.original_traj.end_times[idx - 1]
-    #             seg_end_time = self.original_traj.end_times[idx]
-    #
-    #             if t < seg_start_time:
-    #                 return seg_start_time - t
-    #             elif t > seg_end_time:
-    #                 return t - seg_end_time
-    #             else:
-    #                 return 0.0  # t is inside the segment
-    #
-    #         segment_idx = min(valid_indices, key=_time_dist)
-    #
-    #     self.current_segment_index = segment_idx
-    #
-    #     # Extract the region corresponding to the mode index found above
-    #     mode = self.original_path.pairs[segment_idx].mode
-    #     if isinstance(mode, FaceContactMode):
-    #         # Map face index to region index
-    #         slider_geometry = self.planner.config.dynamics_config.slider.geometry
-    #         region_idx = slider_geometry.get_collision_free_region_for_loc_idx(mode.contact_location.idx)
-    #         collision_free_region = PolytopeContactLocation(ContactLocation.FACE, region_idx)
-    #     else:
-    #         collision_free_region = mode.contact_location
-    #
-    #     return segment_idx, collision_free_region
 
     def _get_closest_time_and_segment(
         self,
@@ -605,11 +560,21 @@ class PlanarPushingMPC:
     def _get_remaining_time_in_current_mode(self, t: float) -> float:
         """
         Gets the remaining time in the current mode.
+        `t` is in the time parameterization of `original_traj` (starts at 0).
         """
         traj = self.original_traj
         end_time = traj.end_times[self.current_segment_index]
         remaining = end_time - t
         return remaining
+
+    def _get_elapsed_time_in_current_mode(self, t: float) -> float:
+        """
+        Gets the elapsed time since the start of the current mode.
+        `t` is in the time parameterization of `original_traj` (starts at 0).
+        """
+        traj = self.original_traj
+        start_time = traj.start_times[self.current_segment_index]
+        return t - start_time
 
     def _update_mode_timing(self, t: float, segment_idx: int) -> None:
         """
@@ -651,48 +616,106 @@ class PlanarPushingMPC:
         6) Optionally save trajectory and video outputs
         """
 
-        # Determine best_t and segment_idx using state if available
-        best_t = t
-        segment_idx = None
-        # We first find best_t based on the state to get a good time estimate
-        # best_t, _ = self._get_closest_time_and_segment(current_slider_pose, current_pusher_pose)
+        # `t` stays as episode time throughout; `t_local` is original_traj-relative (starts at 0).
+        t_local = t - self.original_traj_epoch
 
         # Find segment_idx that the system is currently in by checking feasibility of state in each mode
         segment_idx, collision_free_region = self._get_segment_and_region_from_state(
             current_slider_pose,
             current_pusher_pose,
-            t=best_t,  # time used to break ties or as fallbackonly
+            t=t_local,  # time used to break ties or as fallback only
             is_in_contact=is_in_contact,
         )
+
+        # If the plan has completed (no time left in the final mode), return a stationary traj at current state.
+        if (
+            segment_idx == len(self.original_path.pairs) - 1
+            and self._get_remaining_time_in_current_mode(t_local) <= 1e-3
+        ):
+            return StationaryPlanarPushingTrajectory(self.config, current_slider_pose, current_pusher_pose, 1)
+
+        ################################################################################################################
+        ### Double-plan trigger: replan from scratch once the pusher is 0.3s into the first non-collision mode that
+        ### follows the last contact mode. We intentionally allow the pusher to leave contact before initiating the
+        ### double plan so the pusher gains some velocity and is incentivized to actually move and do a human-looking
+        ### correction (rather than doing some unrealistic-looking friction hacking).
+        DOUBLE_PLAN_DELAY = 0.1  # seconds into the post-contact non-collision mode
+        current_mode = self.original_path.pairs[segment_idx].mode
+        if self.double_plan and isinstance(current_mode, NonCollisionMode):
+            # Check whether every remaining mode (after the current one) is non-collision, meaning
+            # we have already left the last contact mode.
+            all_remaining_non_collision = not any(
+                isinstance(self.original_path.pairs[i].mode, FaceContactMode)
+                for i in range(segment_idx, len(self.original_path.pairs))
+            )
+            if all_remaining_non_collision:
+                elapsed_in_mode = self._get_elapsed_time_in_current_mode(t_local)
+                if elapsed_in_mode >= DOUBLE_PLAN_DELAY - 1e-3:
+                    print(
+                        f"Double plan triggered: {elapsed_in_mode:.3f}s into "
+                        "post-contact non-collision mode. Replanning from scratch..."
+                    )
+                    self.double_plan = False
+
+                    # Tighten soft target tolerances so the replanned trajectory doesn't "give up early".
+                    cfg = self.planner.config
+                    cfg.soft_slider_target_eps_pos = cfg.double_plan_soft_slider_target_eps_pos
+                    cfg.soft_slider_target_eps_ang = cfg.double_plan_soft_slider_target_eps_ang
+
+                    self.previous_short_mode_vertex = None
+                    self.planner.config.start_and_goal.slider_initial_pose = current_slider_pose
+                    self.planner.config.start_and_goal.pusher_initial_pose = current_pusher_pose
+                    self.planner.formulate_problem()
+                    self._update_initial_poses(
+                        current_slider_pose,
+                        current_pusher_pose,
+                        mode_sequence=[],
+                        current_pusher_velocity=current_pusher_velocity,
+                        collision_free_region=collision_free_region,
+                        soft_source_node_pose_constraint=False,
+                    )
+                    path = self.planner.plan_path(self.solver_params, store_result=False, rounded=rounded)
+                    if path is not None:
+                        self.original_path = path
+                        self.original_traj = path.to_traj(rounded=True)
+                        self.traj = self.original_traj
+                        self.original_traj_epoch = t
+                        self.traj_epoch = t
+                        self.current_segment_index = 1
+                        self._was_in_contact = False
+                        print(
+                            "Double plan successful. New mode sequence: "
+                            f"{[p.vertex.name() for p in self.original_path.pairs]}"
+                        )
+                        return self.traj
+                    else:
+                        print("Double plan failed. Continuing with original plan.")
+        ################################################################################################################
 
         ################################################################################################################
         ### THIS IS A HACKY (NON-MARKOVIAN) FIX:
         ### If we are in the last 0.3s of the final contact mode, run the latter part of this mode open-loop to prevent
         ### the optimization from creating crazy results.
         if is_in_contact:
-            current_mode = self.original_path.pairs[segment_idx].mode
             if isinstance(current_mode, FaceContactMode):
-                remaining_time = self._get_remaining_time_in_current_mode(t)
-
-                # Check if this is the last contact mode
-                is_last_contact_mode = True
-                for i in range(segment_idx + 1, len(self.original_path.pairs)):
-                    if isinstance(self.original_path.pairs[i].mode, FaceContactMode):
-                        is_last_contact_mode = False
-                        break
-
+                remaining_time = self._get_remaining_time_in_current_mode(t_local)
+                is_last_contact_mode = not any(
+                    isinstance(self.original_path.pairs[i].mode, FaceContactMode)
+                    for i in range(segment_idx + 1, len(self.original_path.pairs))
+                )
                 if is_last_contact_mode and remaining_time <= 0.3 + 1e-3:
                     print(
-                        f"Remaining time in last contact mode {remaining_time:.4f} <= 0.3s. Returning slice of original traj."
+                        f"Remaining time in last contact mode {remaining_time:.4f} <= 0.3s. "
+                        "Returning slice of original traj."
                     )
-                    self._was_in_contact = is_in_contact
-                    return self.traj.get_slice(t - self.traj_start_time)
+                    self._was_in_contact = True
+                    return self.traj.get_slice(t - self.traj_epoch)
         ################################################################################################################
 
         mode_sequence = self._get_remaining_mode_sequence(segment_idx=segment_idx)
         print(f"    Mode sequence: {mode_sequence}")
 
-        self._update_mode_timing(t, segment_idx)
+        self._update_mode_timing(t_local, segment_idx)
         print(f"    Current mode remaining t: {self.config.time_first_mode}")
 
         ################################################################################################################
@@ -718,7 +741,6 @@ class PlanarPushingMPC:
             mode_sequence,
             current_pusher_velocity,
             collision_free_region=collision_free_region,
-            # soft_source_node_pose_constraint=soft_source_node_pose_constraint if is_in_contact else False,
             soft_source_node_pose_constraint=True,
         )
 
@@ -726,7 +748,7 @@ class PlanarPushingMPC:
             self.solver_params, active_vertices=mode_sequence, store_result=False, rounded=rounded
         )
         self.traj = path.to_traj(rounded=True)
-        self.traj_start_time = t
+        self.traj_epoch = t
 
         # Save outputs if requested
         if path is not None and (save_video or save_traj or save_unrounded_video) and output_folder:

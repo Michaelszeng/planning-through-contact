@@ -76,6 +76,15 @@ class PlanarPushingPlanner:
 
     def formulate_problem(self) -> None:
         assert self.config.start_and_goal is not None
+
+        # If we are re-formulating (e.g. MPC double-plan) and we call this function a second time, we must reset any
+        # graph-cached state to avoid mixing vertices/edges from a previous GraphOfConvexSets instance.
+        self.source = None
+        self.target = None
+        self.edges = {}
+        self.extra_vertex_mode_pairs = {}
+        self.relaxed_gcs_result = None
+
         self.slider_pose_initial = self.config.start_and_goal.slider_initial_pose
         self.slider_pose_target = self.config.start_and_goal.slider_target_pose
         self.pusher_pose_initial = self.config.start_and_goal.pusher_initial_pose
@@ -140,8 +149,12 @@ class PlanarPushingPlanner:
                 self.source_subgraph = self._create_entry_or_exit_subgraph("entry")
                 self.target_subgraph = self._create_entry_or_exit_subgraph("exit")
 
-        self._set_initial_poses(self.pusher_pose_initial, self.slider_pose_initial)
-        self._set_target_poses(self.pusher_pose_target, self.slider_pose_target)
+        # When solving the GCS problem from scratch, we use hard constraints on the source and target poses
+        # THIS COMMENT MAY NOT BE TRUE ANYMORE
+        self._set_initial_poses(
+            self.pusher_pose_initial, self.slider_pose_initial, soft_source_node_pose_constraint=True
+        )
+        self._set_target_poses(self.pusher_pose_target, self.slider_pose_target, soft_slider_target_constraint=True)
 
         # Save edges to self.edges
         for edge in self.gcs.Edges():

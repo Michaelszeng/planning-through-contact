@@ -359,12 +359,12 @@ class FaceContactTrajSegment(AbstractTrajSegment):
 
     def get_c_n(self, t: float) -> float:
         c_n = self.c_n.eval(t)
-        assert type(c_n) == float
+        assert isinstance(c_n, float)
         return c_n
 
     def get_c_f(self, t: float) -> float:
         c_f = self.c_f.eval(t)
-        assert type(c_f) == float
+        assert isinstance(c_f, float)
         return c_f
 
     def get_f_W(self, t: float) -> npt.NDArray[np.float64]:
@@ -1065,3 +1065,138 @@ class SlicedPlanarPushingTrajectory(PlanarPushingTrajectory):
 
     def get_pusher_velocity(self, t: float) -> npt.NDArray[np.float64]:
         return self._original_traj.get_pusher_velocity(self._slice_start_time + t)
+
+
+class StationaryPlanarPushingTrajectory(AbstractPlanarPushingTrajectory):
+    """
+    A stationary (time-invariant) planar pushing trajectory.
+
+    This is useful for the MPC planner after a plan has fully completed: we want to
+    hold position and report NO_CONTACT, rather than repeating the final mode of the
+    original plan.
+    """
+
+    def __init__(
+        self,
+        config: PlanarPlanConfig,
+        slider_pose: "PlanarPose",
+        pusher_pose: "PlanarPose",
+        duration: float = 1.0,
+        mode: PlanarPushingContactMode = PlanarPushingContactMode.NO_CONTACT,
+    ) -> None:
+        self._config = config
+        self._slider_pose = slider_pose
+        self._pusher_pose = pusher_pose
+        self._duration = max(0.0, float(duration))
+        self._mode = mode
+
+    @property
+    def config(self) -> PlanarPlanConfig:
+        return self._config
+
+    @property
+    def start_time(self) -> float:
+        return 0.0
+
+    @property
+    def end_time(self) -> float:
+        return self._duration
+
+    def _t_or_end_time(self, t: float) -> float:
+        if t <= 0.0:
+            return 0.0
+        if t >= self.end_time:
+            return self.end_time
+        return t
+
+    def get_mode(self, t: float) -> PlanarPushingContactMode:
+        _ = self._t_or_end_time(t)
+        return self._mode
+
+    def get_knot_point_value(
+        self,
+        t: float,
+        traj_to_get: Literal["p_WB", "R_WB", "p_WP", "f_c_W"],
+    ) -> npt.NDArray[np.float64] | float:
+        return self.get_value(t, traj_to_get)
+
+    def get_value(  # noqa: C901
+        self,
+        t: float,
+        traj_to_get: Literal[
+            "p_WB",
+            "v_WB",
+            "R_WB",
+            "p_WP",
+            "p_Wc",
+            "f_c_W",
+            "f_B",
+            "c_n",
+            "c_f",
+            "theta",
+            "theta_dot",
+            "p_BP",
+            "state",
+            "control",
+        ],
+    ) -> npt.NDArray[np.float64] | float:
+        _ = self._t_or_end_time(t)
+
+        p_WB = self._slider_pose.pos()
+        theta = float(self._slider_pose.theta)
+        p_WP = self._pusher_pose.pos()
+
+        if traj_to_get == "p_WB":
+            return p_WB
+        if traj_to_get == "p_WP":
+            return p_WP
+        if traj_to_get == "theta":
+            return theta
+
+        if traj_to_get in {"v_WB", "p_BP", "p_Wc"}:
+            # No meaningful p_BP / p_Wc without a contact geometry. For downstream consumers,
+            # returning zeros is safer than repeating the last planned (moving) values.
+            return np.zeros((2, 1))
+
+        if traj_to_get == "theta_dot":
+            return 0.0
+
+        if traj_to_get == "R_WB":
+            c = np.cos(theta)
+            s = np.sin(theta)
+            R = np.array([[c, -s, 0.0], [s, c, 0.0], [0.0, 0.0, 1.0]])
+            return R
+
+        if traj_to_get in {"f_c_W", "f_B"}:
+            return np.zeros((2, 1))
+        if traj_to_get in {"c_n", "c_f"}:
+            return 0.0
+
+        if traj_to_get in {"state", "control"}:
+            raise NotImplementedError(
+                "StationaryPlanarPushingTrajectory does not provide 'state'/'control' "
+                "because those are contact-mode specific."
+            )
+
+        raise NotImplementedError(f"Unsupported value '{traj_to_get}' for stationary trajectory.")
+
+    def get_slider_planar_pose(self, t: float) -> "PlanarPose":
+        _ = self._t_or_end_time(t)
+        return self._slider_pose
+
+    def get_pusher_planar_pose(self, t: float) -> "PlanarPose":
+        _ = self._t_or_end_time(t)
+        return self._pusher_pose
+
+    def get_slider_velocity(self, t: float) -> npt.NDArray[np.float64]:
+        _ = self._t_or_end_time(t)
+        return np.zeros(3)
+
+    def get_pusher_velocity(self, t: float) -> npt.NDArray[np.float64]:
+        _ = self._t_or_end_time(t)
+        return np.zeros(2)
+
+    def get_slice(self, start_time: float) -> "StationaryPlanarPushingTrajectory":
+        # Slicing a stationary trajectory is still stationary.
+        _ = start_time
+        return self
