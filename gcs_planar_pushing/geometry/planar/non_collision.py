@@ -383,12 +383,38 @@ class NonCollisionMode(AbstractContactMode):
     def set_slider_pose(self, pose: PlanarPose, soft: bool = False) -> None:
         self.slider_pose = pose
         if not soft:
-            self.prog.AddLinearConstraint(self.variables.cos_th == np.cos(pose.theta))
-            self.prog.AddLinearConstraint(self.variables.sin_th == np.sin(pose.theta))
-            self.prog.AddLinearConstraint(eq(self.variables.p_WB, pose.pos()))
-        else:
-            W_POS = 1e6
+            # self.prog.AddLinearConstraint(self.variables.cos_th == np.cos(pose.theta))
+            # self.prog.AddLinearConstraint(self.variables.sin_th == np.sin(pose.theta))
+            # self.prog.AddLinearConstraint(eq(self.variables.p_WB, pose.pos()))
+
+            # We don't actually have a hard constraint, just a very strict soft constraint
+            W_POS = 1e5
             W_ANG = 1e4
+            EPS_POS = 0.0001
+            EPS_ANG = 0.002
+
+            cos_t, sin_t = np.cos(pose.theta), np.sin(pose.theta)
+
+            # Bounding box around target to keep the convex set compact
+            self.prog.AddBoundingBoxConstraint(pose.x - EPS_POS, pose.x + EPS_POS, self.variables.p_WB_x)
+            self.prog.AddBoundingBoxConstraint(pose.y - EPS_POS, pose.y + EPS_POS, self.variables.p_WB_y)
+            self.prog.AddBoundingBoxConstraint(cos_t - EPS_ANG, cos_t + EPS_ANG, self.variables.cos_th)
+            self.prog.AddBoundingBoxConstraint(sin_t - EPS_ANG, sin_t + EPS_ANG, self.variables.sin_th)
+
+            # Quadratic cost on position error: W_POS * ||p - p_target||^2
+            pos_vars = np.array([self.variables.p_WB_x, self.variables.p_WB_y])
+            pos_target = np.array([pose.x, pose.y])
+            Q = 2 * W_POS * np.eye(2)
+            b = -2 * W_POS * pos_target
+            c = W_POS * pos_target @ pos_target
+            self.prog.AddQuadraticCost(Q, b, c, pos_vars, is_convex=True)
+
+            # Linear cost on angle error: W_ANG * (1 - cos(dθ))
+            angle_cost = W_ANG * (1 - cos_t * self.variables.cos_th - sin_t * self.variables.sin_th)
+            self.prog.AddLinearCost(angle_cost)
+        else:
+            W_POS = 1e5
+            W_ANG = 2e3
             EPS_POS = float(getattr(self.config, "soft_slider_target_eps_pos", 0.015))
             EPS_ANG = float(getattr(self.config, "soft_slider_target_eps_ang", 0.075))
 
@@ -420,7 +446,7 @@ class NonCollisionMode(AbstractContactMode):
         if not soft_source_node_pose_constraint:
             self.prog.AddLinearConstraint(eq(self.variables.p_BPs[0], pose.pos()))
         else:
-            W = 1e7
+            W = 1e6
             EPS_XY = 0.00125
 
             p = pose.pos().flatten()

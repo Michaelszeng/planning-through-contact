@@ -242,6 +242,15 @@ class PlanarPlanConfig:
     double_plan_soft_slider_target_eps_pos: float = 0.003
     double_plan_soft_slider_target_eps_ang: float = 0.025
 
+    # Optional shorter contact duration used only for the double-plan MPC re-formulation.
+    # If None, uses the normal ``time_in_contact``.
+    double_plan_time_in_contact: Optional[float] = None
+
+    # Optional alternative costs used only for the double-plan MPC re-formulation.
+    # If None, the normal costs are kept.
+    double_plan_contact_cost: Optional["ContactCost"] = None
+    double_plan_non_collision_cost: Optional["NonCollisionCost"] = None
+
     @property
     def dt_contact(self) -> float:
         return self.time_in_contact / self.num_knot_points_contact

@@ -106,8 +106,8 @@ def get_default_contact_cost() -> ContactCost:
         keypoint_velocity_regularization=100.0,
         trace=None,
         # mode_transition_cost=None,
-        mode_transition_cost=10.0,
-        angular_velocity_regularization=80.0,
+        mode_transition_cost=15.0,
+        angular_velocity_regularization=65.0,
         time=1.0,
     )
     return contact_cost
@@ -115,9 +115,31 @@ def get_default_contact_cost() -> ContactCost:
 
 def get_default_non_collision_cost() -> NonCollisionCost:
     non_collision_cost = NonCollisionCost(
-        distance_to_object=0.1,
+        distance_to_object=0.3,
         pusher_velocity_regularization=10.0,
         pusher_arc_length=10.0,
+    )
+    return non_collision_cost
+
+
+def get_double_plan_contact_cost() -> ContactCost:
+    contact_cost = ContactCost(
+        keypoint_arc_length=0.1,
+        force_regularization=10000.0,
+        keypoint_velocity_regularization=50.0,
+        trace=None,
+        # mode_transition_cost=1.0,
+        angular_velocity_regularization=500.0,
+        time=1.0,
+    )
+    return contact_cost
+
+
+def get_double_plan_non_collision_cost() -> NonCollisionCost:
+    non_collision_cost = NonCollisionCost(
+        distance_to_object=0.25,
+        pusher_velocity_regularization=10.0,
+        pusher_arc_length=2.0,
     )
     return non_collision_cost
 
@@ -180,6 +202,10 @@ def get_default_plan_config(
     else:
         raise NotImplementedError(f"Slider type {slider_type} not supported")
 
+    double_plan_time_in_contact = None  # Default is None
+    double_plan_contact_cost_val = None
+    double_plan_non_collision_cost_val = None
+
     if use_case == "hardware":  # used for generating plans for hardware demos
         slider_pusher_config = SliderPusherSystemConfig(
             slider=slider,
@@ -214,6 +240,10 @@ def get_default_plan_config(
 
         time_contact = 4.0
         time_non_collision = 2.0
+
+        double_plan_time_in_contact = 1.5
+        double_plan_contact_cost_val = get_double_plan_contact_cost()
+        double_plan_non_collision_cost_val = get_double_plan_non_collision_cost()
 
         num_knot_points_non_collision = 3
         num_knot_points_contact = 3
@@ -267,6 +297,9 @@ def get_default_plan_config(
         allow_teleportation=False,
         time_in_contact=time_contact,
         time_non_collision=time_non_collision,
+        double_plan_time_in_contact=double_plan_time_in_contact,
+        double_plan_contact_cost=double_plan_contact_cost_val,
+        double_plan_non_collision_cost=double_plan_non_collision_cost_val,
         workspace=workspace,
     )
 
@@ -286,9 +319,9 @@ def get_default_solver_params(debug: bool = False, clarabel: bool = False) -> Pl
         print_cost=debug,
         assert_result=False,
         assert_nan_values=True,
-        nonl_round_major_feas_tol=1e-5,
-        nonl_round_minor_feas_tol=1e-5,
-        nonl_round_opt_tol=1e-5,
+        nonl_round_major_feas_tol=2e-4,
+        nonl_round_minor_feas_tol=1e-4,
+        nonl_round_opt_tol=1e-4,
     )
     return solver_params
 

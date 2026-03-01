@@ -22,10 +22,11 @@ arbitrary_shape_pickle_path = "arbitrary_shape_pickles/small_t_pusher.pkl"
 
 # Initial poses
 slider_initial_poses = {
-    "SEED=0": PlanarPose(0.6417846749285816, -0.10456398587083891, -2.8749678804892476),  # SEED = 0
-    "SEED=1": PlanarPose(0.49916350319441594, -0.039942707670509475, 3.0109461664097754),  # SEED = 1
-    "SEED=2": PlanarPose(0.649973205950237, -0.016820301165871604, -2.1917248908936977),  # SEED = 2
-    "SEED=3": PlanarPose(0.5592512081656711, -0.009460428568557777, 1.4896221348603618),  # SEED = 3
+    # "SEED=0": PlanarPose(0.6417846749285816, -0.10456398587083891, -2.8749678804892476),
+    # "SEED=1": PlanarPose(0.49916350319441594, -0.039942707670509475, 3.0109461664097754),
+    # "SEED=2": PlanarPose(0.649973205950237, -0.016820301165871604, -2.1917248908936977),
+    # "SEED=3": PlanarPose(0.5592512081656711, -0.009460428568557777, 1.4896221348603618),
+    # "SEED=5": PlanarPose(0.6664047961273243, -0.05093676977188713, 1.8723134275360458),
 }
 
 pusher_initial_pose = PlanarPose(0.587, 0.15, 0.0)
@@ -99,8 +100,8 @@ for name, slider_initial_pose in slider_initial_poses.items():
         # Try some perturbation
         pos = current_pusher_pose.pos()
         theta = current_pusher_pose.theta
-        current_pusher_pose = PlanarPose(pos[0, 0] + 0.0005, pos[1, 0], theta)
-        current_pusher_velocity = current_pusher_velocity * 1.01
+        current_pusher_pose = PlanarPose(pos[0, 0] + 0.005, pos[1, 0] + 0.001, theta)
+        current_pusher_velocity = current_pusher_velocity * 1.1
 
         print(f"current_slider_pose: {current_slider_pose}")
         print(f"current_pusher_pose: {current_pusher_pose}")
@@ -118,7 +119,8 @@ for name, slider_initial_pose in slider_initial_poses.items():
             output_name=f"arbitrary_small_t_pusher_trajectory_{name}_t={t}",
             save_video=True,
             interpolate_video=True,
-            rounded=True,
+            # rounded=True
+            rounded=False,
             overlay_traj=True,
         )
         print(f"Time taken for MPC replan: {time.time() - start}")

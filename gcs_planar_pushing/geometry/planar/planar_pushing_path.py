@@ -577,8 +577,7 @@ class PlanarPushingPath:
             "Major Optimality Tolerance",
             solver_params.nonl_round_opt_tol,
         )
-        # The performance seems to be better when these (minor step) parameters are left
-        # to their default value
+        # The performance seems to be better when these (minor step) parameters are left to their default value
         solver_options.SetOption(
             snopt.solver_id(),
             "Minor Feasibility Tolerance",
@@ -594,6 +593,19 @@ class PlanarPushingPath:
             "Major iterations limit",
             solver_params.nonl_round_major_iter_limit,
         )
+
+        # Testing new options for SNOPT
+        solver_options.SetOption(snopt.solver_id(), "Minor iterations limit", 20000)
+        solver_options.SetOption(snopt.solver_id(), "Scale option", 3)  # THIS OPTION IS MAGICALLY GOOD
+        solver_options.SetOption(snopt.solver_id(), "Total real objective evaluations", 2000000)
+        solver_options.SetOption(snopt.solver_id(), "Total iterations limit", 200000)
+        # solver_options.SetOption(snopt.solver_id(), "Hessian updates", 999999)  # allow updates
+        # solver_options.SetOption(snopt.solver_id(), "Hessian frequency", 20)  # reset/refresh frequency
+        solver_options.SetOption(snopt.solver_id(), "Linesearch tolerance", 0.9)
+        # solver_options.SetOption(snopt.solver_id(), "Elastic mode", 1)
+        # solver_options.SetOption(snopt.solver_id(), "Elastic weight", 1e4)
+        # solver_options.SetOption(snopt.solver_id(), "Elastic tolerance", 1e-4)
+        solver_options.SetOption(snopt.solver_id(), "Major step limit", 0.2)
 
         mode_prog_vars = np.concatenate([mode.prog.decision_variables() for _, mode in self.pairs])
         prog.SetInitialGuess(mode_prog_vars, initial_guess)

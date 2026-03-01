@@ -101,18 +101,19 @@ class PlanarPushingMPC:
         # Both times below are in **episode** (simulation-clock) time.
         #
         # Episode time when `original_traj` was created.  `original_traj` is parameterised from t=0,
-        # so to index into it we compute  t_episode - original_traj_epoch.
-        self.original_traj_epoch = 0.0
+        # so to index into it we compute  t_episode - original_traj_start_time.
+        self.original_traj_start_time = 0.0
         # Episode time when the latest `self.traj` was created (updated every MPC cycle).
         # `self.traj` is also parameterised from t=0, so to index into it we compute
-        # t_episode - traj_epoch.
-        self.traj_epoch = 0.0
+        # t_episode - traj_start_time.
+        self.traj_start_time = 0.0
 
         # Store "short" mode vertex, which is a copy of the original vertex in the GCS but with a shorter time to
         # account for the passage of time during MPC iterations.
         self.previous_short_mode_vertex = None  # Optional[GcsVertex]
         self.current_segment_index = 1  # Start at second mode to skip source node
         self._was_in_contact = False
+        self._force_transition_next_iter = False
 
     def load_original_path(self, filename: str) -> None:
         """Loads the original path from a file."""
@@ -120,9 +121,10 @@ class PlanarPushingMPC:
         self.original_path = PlanarPushingPath.load(filename, self.planner.gcs, all_pairs)
         self.original_traj = self.original_path.to_traj()
         self.traj = self.original_traj
-        self.original_traj_epoch = 0.0
-        self.traj_epoch = 0.0
+        self.original_traj_start_time = 0.0
+        self.traj_start_time = 0.0
         self.current_segment_index = 1  # Start at second mode to skip source node
+        self._force_transition_next_iter = False
         print(f"Original Path Mode Sequence: {[pair.vertex.name() for pair in self.original_path.pairs]}")
 
     def _is_state_in_mode(
@@ -130,7 +132,7 @@ class PlanarPushingMPC:
         slider_pose: PlanarPose,
         pusher_pose: PlanarPose,
         mode: AbstractContactMode,
-        non_coll_tol: float = 1e-10,
+        non_coll_tol: float = 1e-5,
         coll_tol: float = 1e-3,
     ) -> bool:
         """
@@ -202,6 +204,20 @@ class PlanarPushingMPC:
         else:
             candidates = list(range(len(self.original_path.pairs)))  # All modes are candidates
 
+        # Handle deferred forced transition from previous iteration
+        if self._force_transition_next_iter:
+            self._force_transition_next_iter = False
+            next_idx = self.current_segment_index + 1
+            if next_idx < len(self.original_path.pairs) and isinstance(
+                self.original_path.pairs[next_idx].mode, NonCollisionMode
+            ):
+                print("Executing deferred forced transition to next mode")
+                segment_idx = next_idx
+                self.current_segment_index = segment_idx
+                mode = self.original_path.pairs[segment_idx].mode
+                collision_free_region = mode.contact_location
+                return segment_idx, collision_free_region
+
         # If there is contact
         if is_in_contact:
             current_mode = self.original_path.pairs[self.current_segment_index].mode
@@ -220,16 +236,18 @@ class PlanarPushingMPC:
                 remaining_time = self._get_remaining_time_in_current_mode(t)
                 next_idx = self.current_segment_index + 1
 
-                # If there is no time left in the contact mode, force a transition to the next mode
+                # If there is no time left in the contact mode, schedule a transition at the next iteration
                 if (
                     remaining_time <= 1e-3
                     and next_idx in candidates
                     and isinstance(self.original_path.pairs[next_idx].mode, NonCollisionMode)
                 ):
                     print(
-                        f"Forcing transition to next mode bc remaining time in contact mode too small: {remaining_time}"
+                        f"ℹ️ Scheduling forced transition at next iteration bc remaining time in contact mode "
+                        f"too small: {remaining_time}"
                     )
-                    segment_idx = next_idx
+                    self._force_transition_next_iter = True
+                    segment_idx = self.current_segment_index
                 # Otherwise, continue in the contact mode.
                 else:
                     valid_indices = [
@@ -250,14 +268,28 @@ class PlanarPushingMPC:
                 if self._is_state_in_mode(slider_pose, pusher_pose, self.original_path.pairs[i].mode)
             ]
 
-            assert len(valid_indices) > 0, "No mode is valid for the current state somehow."
+            # assert len(valid_indices) > 0, "No mode is valid for the current state somehow."
+            if len(valid_indices) == 0:
+                if len(candidates) == 1:
+                    print(
+                        f"⚠️ WARNING: No mode is valid for the current state somehow. Candidates: {candidates}."
+                        "Picking the only candidate mode."
+                    )
+                    segment_idx = candidates[0]
+                else:
+                    print(
+                        f"⚠️ WARNING: No mode is valid for the current state somehow. Candidates: {candidates}."
+                        "Picking the second candidate mode."
+                    )
+                    # In the case that this happens at the transition between two non-collision modes, we pick the second
+                    segment_idx = candidates[1]
 
             # If only one mode is valid, use it
-            if len(valid_indices) == 1:
+            elif len(valid_indices) == 1:
                 segment_idx = valid_indices[0]
             # If multiple modes are valid, pick the one that is closest in time
             else:
-                print("WARNING: Multiple modes are valid for the current state.")
+                print("⚠️ WARNING: Multiple modes are valid for the current state.")
 
                 def _time_dist(idx: int) -> float:
                     seg_start_time = (
@@ -584,7 +616,7 @@ class PlanarPushingMPC:
         remaining = self._get_remaining_time_in_current_mode(t)
         self.config.time_first_mode = max(remaining, 1e-1)
         if remaining < 1e-1:
-            print(f"WARNING: Remaining time {remaining:.4f} < 0.1s. Increasing to 0.1s to avoid numerical issues.")
+            print(f"⚠️ WARNING: Remaining time {remaining:.4f} < 0.1s. Increasing to 0.1s to avoid numerical issues.")
 
     def plan(
         self,
@@ -605,6 +637,7 @@ class PlanarPushingMPC:
         animation_lims: Optional[Tuple[float, float, float, float]] = None,
         hardware: bool = False,
         rounded: bool = True,
+        success: bool = False,  # Whether simulator detects success
     ) -> Optional[PlanarPushingPath]:
         """
         Using current time, plan a new path from the current state and pusher velocity.
@@ -617,7 +650,7 @@ class PlanarPushingMPC:
         """
 
         # `t` stays as episode time throughout; `t_local` is original_traj-relative (starts at 0).
-        t_local = t - self.original_traj_epoch
+        t_local = t - self.original_traj_start_time
 
         # Find segment_idx that the system is currently in by checking feasibility of state in each mode
         segment_idx, collision_free_region = self._get_segment_and_region_from_state(
@@ -641,7 +674,7 @@ class PlanarPushingMPC:
         ### correction (rather than doing some unrealistic-looking friction hacking).
         DOUBLE_PLAN_DELAY = 0.1  # seconds into the post-contact non-collision mode
         current_mode = self.original_path.pairs[segment_idx].mode
-        if self.double_plan and isinstance(current_mode, NonCollisionMode):
+        if not success and self.double_plan and isinstance(current_mode, NonCollisionMode):
             # Check whether every remaining mode (after the current one) is non-collision, meaning
             # we have already left the last contact mode.
             all_remaining_non_collision = not any(
@@ -652,7 +685,7 @@ class PlanarPushingMPC:
                 elapsed_in_mode = self._get_elapsed_time_in_current_mode(t_local)
                 if elapsed_in_mode >= DOUBLE_PLAN_DELAY - 1e-3:
                     print(
-                        f"Double plan triggered: {elapsed_in_mode:.3f}s into "
+                        f"ℹ️ Double plan triggered: {elapsed_in_mode:.3f}s into "
                         "post-contact non-collision mode. Replanning from scratch..."
                     )
                     self.double_plan = False
@@ -665,6 +698,20 @@ class PlanarPushingMPC:
                     self.previous_short_mode_vertex = None
                     self.planner.config.start_and_goal.slider_initial_pose = current_slider_pose
                     self.planner.config.start_and_goal.pusher_initial_pose = current_pusher_pose
+
+                    # Optionally override time / costs for the double-plan.
+                    time_in_contact_cache = cfg.time_in_contact
+                    if cfg.double_plan_time_in_contact is not None:
+                        cfg.time_in_contact = cfg.double_plan_time_in_contact
+
+                    contact_cost_cache = cfg.contact_config.cost
+                    if cfg.double_plan_contact_cost is not None:
+                        cfg.contact_config.cost = cfg.double_plan_contact_cost
+
+                    non_collision_cost_cache = cfg.non_collision_cost
+                    if cfg.double_plan_non_collision_cost is not None:
+                        cfg.non_collision_cost = cfg.double_plan_non_collision_cost
+
                     self.planner.formulate_problem()
                     self._update_initial_poses(
                         current_slider_pose,
@@ -675,21 +722,26 @@ class PlanarPushingMPC:
                         soft_source_node_pose_constraint=False,
                     )
                     path = self.planner.plan_path(self.solver_params, store_result=False, rounded=rounded)
+
+                    # # Restore originals so subsequent normal MPC cycles are unaffected.
+                    # cfg.time_in_contact = time_in_contact_cache
+                    # cfg.contact_config.cost = contact_cost_cache
+                    # cfg.non_collision_cost = non_collision_cost_cache
                     if path is not None:
                         self.original_path = path
                         self.original_traj = path.to_traj(rounded=True)
                         self.traj = self.original_traj
-                        self.original_traj_epoch = t
-                        self.traj_epoch = t
+                        self.original_traj_start_time = t
+                        self.traj_start_time = t
                         self.current_segment_index = 1
                         self._was_in_contact = False
                         print(
-                            "Double plan successful. New mode sequence: "
+                            "ℹ️ Double plan successful. New mode sequence: "
                             f"{[p.vertex.name() for p in self.original_path.pairs]}"
                         )
                         return self.traj
                     else:
-                        print("Double plan failed. Continuing with original plan.")
+                        print("❌ Double plan failed. Continuing with original plan.")
         ################################################################################################################
 
         ################################################################################################################
@@ -705,18 +757,18 @@ class PlanarPushingMPC:
                 )
                 if is_last_contact_mode and remaining_time <= 0.3 + 1e-3:
                     print(
-                        f"Remaining time in last contact mode {remaining_time:.4f} <= 0.3s. "
+                        f"ℹ️ Remaining time in last contact mode {remaining_time:.4f} <= 0.3s. "
                         "Returning slice of original traj."
                     )
                     self._was_in_contact = True
-                    return self.traj.get_slice(t - self.traj_epoch)
+                    return self.traj.get_slice(t - self.traj_start_time)
         ################################################################################################################
 
         mode_sequence = self._get_remaining_mode_sequence(segment_idx=segment_idx)
-        print(f"    Mode sequence: {mode_sequence}")
+        print(f"    ⚙️ Mode sequence: {mode_sequence}")
 
         self._update_mode_timing(t_local, segment_idx)
-        print(f"    Current mode remaining t: {self.config.time_first_mode}")
+        print(f"    ⏰ Current mode remaining t: {self.config.time_first_mode}")
 
         ################################################################################################################
         ### THIS IS A HACKY (NON-MARKOVIAN) FIX:
@@ -747,8 +799,11 @@ class PlanarPushingMPC:
         path = self.planner.plan_path(
             self.solver_params, active_vertices=mode_sequence, store_result=False, rounded=rounded
         )
-        self.traj = path.to_traj(rounded=True)
-        self.traj_epoch = t
+        print(
+            f"    🔍 path.relaxed_cost: {path.relaxed_cost}; path.rounded_cost: {path.rounded_cost} (path.rounded_result.is_success(): {path.rounded_result.is_success()})"
+        )
+        self.traj = path.to_traj(rounded=rounded)
+        self.traj_start_time = t
 
         # Save outputs if requested
         if path is not None and (save_video or save_traj or save_unrounded_video) and output_folder:

@@ -152,9 +152,9 @@ class PlanarPushingPlanner:
         # When solving the GCS problem from scratch, we use hard constraints on the source and target poses
         # THIS COMMENT MAY NOT BE TRUE ANYMORE
         self._set_initial_poses(
-            self.pusher_pose_initial, self.slider_pose_initial, soft_source_node_pose_constraint=True
+            self.pusher_pose_initial, self.slider_pose_initial, soft_source_node_pose_constraint=False
         )
-        self._set_target_poses(self.pusher_pose_target, self.slider_pose_target, soft_slider_target_constraint=True)
+        self._set_target_poses(self.pusher_pose_target, self.slider_pose_target, soft_slider_target_constraint=False)
 
         # Save edges to self.edges
         for edge in self.gcs.Edges():
@@ -273,7 +273,7 @@ class PlanarPushingPlanner:
             # Warn if source vertex is disconnected from graph
             outgoing_edges = [e for e in self.gcs.Edges() if e.u() == self.source.vertex]
             if len(outgoing_edges) == 0:
-                print(f"WARNING: Source vertex '{self.source.vertex.name()}' disconnected from graph!")
+                print(f"⚠️ WARNING: Source vertex '{self.source.vertex.name()}' disconnected from graph!")
 
     def _set_target_poses(
         self,
@@ -511,7 +511,7 @@ class PlanarPushingPlanner:
             assert gcs_result.is_success()
 
         if not gcs_result.is_success():
-            print("*" * 60 + "\nWARNING: Solver did not find a solution!\n" + "*" * 60)
+            print("*" * 60 + "\n❌ WARNING: Solver did not find a solution!\n" + "*" * 60)
             return None
 
         if solver_params.measure_solve_time:
@@ -534,7 +534,7 @@ class PlanarPushingPlanner:
             )
 
         if paths is None:
-            print("WARNING: No GCS paths found")
+            print("❌ WARNING: No GCS paths found")
             return None
         else:
             if solver_params.print_rounding_details:
@@ -596,8 +596,10 @@ class PlanarPushingPlanner:
         if rounded:
             print(f"    =====================================> _get_rounded_paths time: {time.time() - start}")
             if feasible_paths is None:
-                print("*" * 60 + "\nWARNING: Rounding returned no feasible paths!\n" + "*" * 60)
-                return None
+                print("*" * 60 + "\n❌ WARNING: Rounding returned no feasible paths!\n")
+                print("*" * 60 + "\n           Returning unrounded path.\n" + "*" * 60)
+                self.path = paths[0]
+                return self.path
             self.path = feasible_paths[0] if active_vertices is None else self._pick_best_path(feasible_paths)
         else:
             self.path = paths[0]

@@ -908,6 +908,7 @@ class PlanarPushingTrajectory(AbstractPlanarPushingTrajectory):
         return planar_pose
 
     def get_slider_velocity(self, t) -> npt.NDArray[np.float64]:
+        t = self._t_or_end_time(t)
         seg = self.get_traj_segment_for_time(t)
         if isinstance(seg, NonCollisionTrajSegment):  # zero velocity if not in contact with pusher
             v_WB = np.zeros(2)
@@ -919,6 +920,7 @@ class PlanarPushingTrajectory(AbstractPlanarPushingTrajectory):
         return np.array([v_WB[0], v_WB[1], theta_dot])
 
     def get_pusher_velocity(self, t) -> npt.NDArray[np.float64]:
+        t = self._t_or_end_time(t)
         seg = self.get_traj_segment_for_time(t)
         if isinstance(seg, NonCollisionTrajSegment):
             v_body = seg.p_BP.traj.EvalDerivative(t)
