@@ -729,3 +729,102 @@ class ArbitraryShape2D(CollisionGeometry):
             boxes_2d.append(Box2d(size[0], size[1]))
             transforms.append(RigidTransform(transform))
         return boxes_2d, transforms
+
+
+def main() -> None:
+    import sys
+
+    import matplotlib.patches as mpatches
+    import matplotlib.pyplot as plt
+    import pydrake.geometry.optimization as opt
+
+    from gcs_planar_pushing.geometry.collision_geometry.collision_geometry import (
+        ContactLocation,
+        PolytopeContactLocation,
+    )
+    from gcs_planar_pushing.geometry.planar.non_collision import NonCollisionMode
+    from gcs_planar_pushing.geometry.rigid_body import RigidBody
+    from gcs_planar_pushing.planning.planar.planar_plan_config import (
+        PlanarPlanConfig,
+        SliderPusherSystemConfig,
+    )
+
+    pickle_path = sys.argv[1] if len(sys.argv) > 1 else "arbitrary_shape_pickles/small_t_pusher.pkl"
+    shape = ArbitraryShape2D(pickle_path)
+
+    # Build the same config and mode objects used by PlanarPushingMPC / NonCollisionSubGraph
+    config = PlanarPlanConfig(
+        dynamics_config=SliderPusherSystemConfig(slider=RigidBody(name="slider", geometry=shape, mass=0.1))
+    )
+    modes = [
+        NonCollisionMode.create_from_plan_spec(PolytopeContactLocation(ContactLocation.FACE, idx), config)
+        for idx in range(shape.num_collision_free_regions)
+    ]
+
+    # Bounding box for clipping the (unbounded) regions to the plot extent
+    all_verts = np.hstack(shape.vertices)
+    margin = 0.05
+    lb = np.array([float(all_verts[0].min()) - margin, float(all_verts[1].min()) - margin])
+    ub = np.array([float(all_verts[0].max()) + margin, float(all_verts[1].max()) + margin])
+    bbox = opt.HPolyhedron.MakeBox(lb, ub)
+
+    colors = [plt.cm.tab10(i / 10.0) for i in range(len(modes))]
+    fig, ax = plt.subplots(figsize=(7, 9))
+
+    for r, mode in enumerate(modes):
+        # Translate the mode's stored planes into Drake's HPolyhedron (Ax <= b):
+        #   region planes:  a^T p >= b       →  -a^T p <=  -b
+        #   contact planes: a^T p >= b + r   →  -a^T p <= -(b + r)
+        r_pusher = mode.dynamics_config.pusher_radius
+        planes = [(p, 0.0) for p in mode.collision_free_space_planes] + [(p, r_pusher) for p in mode.contact_planes]
+        A = np.vstack([-p.a.T for p, _ in planes])
+        b_vec = np.array([-(p.b.item() + offset) for p, offset in planes])
+
+        # Clip to the bounding box and extract CCW-sorted polygon vertices
+        vertices = opt.VPolytope(opt.HPolyhedron(A, b_vec).Intersection(bbox)).vertices()  # (2, n)
+        centroid = vertices.mean(axis=1)
+        order = np.argsort(np.arctan2(vertices[1] - centroid[1], vertices[0] - centroid[0]))
+        v = vertices[:, order]
+
+        ax.fill(v[0], v[1], color=colors[r][:3], alpha=0.4, zorder=1)
+        ax.text(
+            centroid[0],
+            centroid[1],
+            str(r),
+            ha="center",
+            va="center",
+            fontsize=13,
+            fontweight="bold",
+            color=colors[r],
+            zorder=5,
+            bbox=dict(facecolor="white", alpha=0.65, boxstyle="round,pad=0.2"),
+        )
+
+    # Draw the shape
+    verts = np.hstack(shape.vertices)
+    verts_closed = np.hstack([verts, verts[:, :1]])
+    ax.fill(verts_closed[0], verts_closed[1], color="lightgray", zorder=2)
+    ax.plot(verts_closed[0], verts_closed[1], "k-", linewidth=2, zorder=3)
+
+    ax.legend(
+        handles=[mpatches.Patch(facecolor=colors[r], alpha=0.5, label=f"Region {r}") for r in range(len(modes))],
+        loc="upper right",
+        fontsize=9,
+    )
+    ax.set_xlim(lb[0], ub[0])
+    ax.set_ylim(lb[1], ub[1])
+    ax.set_aspect("equal")
+    ax.set_title(f"Collision-Free Mode Regions\n{pickle_path}")
+    ax.set_xlabel("x (body frame, m)")
+    ax.set_ylabel("y (body frame, m)")
+    ax.grid(True, alpha=0.3, zorder=0)
+
+    plt.tight_layout()
+    output_path = pickle_path.replace(".pkl", "_regions.png")
+    plt.savefig(output_path, dpi=150, bbox_inches="tight")
+    print(f"Saved plot to {output_path}")
+    plt.show()
+
+
+if __name__ == "__main__":
+    main()
