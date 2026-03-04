@@ -132,7 +132,7 @@ class PlanarPushingMPC:
         slider_pose: PlanarPose,
         pusher_pose: PlanarPose,
         mode: AbstractContactMode,
-        non_coll_tol: float = 1e-5,
+        non_coll_tol: float = 1e-10,
         coll_tol: float = 1e-3,
     ) -> bool:
         """
@@ -261,6 +261,20 @@ class PlanarPushingMPC:
         # modes. We need to do an actual check based on the system state.
         else:
             candidates = [i for i in candidates if isinstance(self.original_path.pairs[i].mode, NonCollisionMode)]
+
+            # def _time_dist(idx: int) -> float:
+            #     seg_start_time = self.original_traj.start_time if idx == 0 else self.original_traj.end_times[idx - 1]
+            #     seg_end_time = self.original_traj.end_times[idx]
+
+            #     if t < seg_start_time:
+            #         return seg_start_time - t
+            #     elif t > seg_end_time:
+            #         return t - seg_end_time
+            #     else:
+            #         return 0.0  # t is inside the segment
+
+            # segment_idx = min(candidates, key=_time_dist)
+
             # Find all candidate modes that the state *could* be in
             valid_indices = [
                 i
@@ -268,21 +282,21 @@ class PlanarPushingMPC:
                 if self._is_state_in_mode(slider_pose, pusher_pose, self.original_path.pairs[i].mode)
             ]
 
-            # assert len(valid_indices) > 0, "No mode is valid for the current state somehow."
             if len(valid_indices) == 0:
-                if len(candidates) == 1:
-                    print(
-                        f"⚠️ WARNING: No mode is valid for the current state somehow. Candidates: {candidates}."
-                        "Picking the only candidate mode."
-                    )
-                    segment_idx = candidates[0]
-                else:
-                    print(
-                        f"⚠️ WARNING: No mode is valid for the current state somehow. Candidates: {candidates}."
-                        "Picking the second candidate mode."
-                    )
-                    # In the case that this happens at the transition between two non-collision modes, we pick the second
-                    segment_idx = candidates[1]
+                raise ValueError(f"No mode is valid for the current state somehow. Candidates: {candidates}.")
+            #     if len(candidates) == 1:
+            #         print(
+            #             f"⚠️ WARNING: No mode is valid for the current state somehow. Candidates: {candidates}."
+            #             "Picking the only candidate mode."
+            #         )
+            #         segment_idx = candidates[0]
+            #     else:
+            #         print(
+            #             f"⚠️ WARNING: No mode is valid for the current state somehow. Candidates: {candidates}."
+            #             "Picking the second candidate mode."
+            #         )
+            #         # In the case that this happens at the transition between two non-collision modes, we pick the second
+            #         segment_idx = candidates[1]
 
             # If only one mode is valid, use it
             elif len(valid_indices) == 1:
@@ -399,6 +413,7 @@ class PlanarPushingMPC:
         current_pusher_velocity: Optional[npt.NDArray[np.float64]],
         collision_free_region: Optional[PolytopeContactLocation] = None,
         soft_source_node_pose_constraint: bool = False,
+        enforce_velocity_constraint: bool = True,
     ) -> None:
         # Update config
         assert self.planner.config.start_and_goal is not None
@@ -478,7 +493,8 @@ class PlanarPushingMPC:
                         # Enforce initial velocity constraint only if previous re-plan cycle was NOT in contact; coming
                         # out of contact, velocity points into the slider --> pushes 2nd control point into collision.
                         if (
-                            current_pusher_velocity is not None
+                            enforce_velocity_constraint
+                            and current_pusher_velocity is not None
                             and not self._was_in_contact
                             and isinstance(new_mode, NonCollisionMode)
                         ):
@@ -667,13 +683,19 @@ class PlanarPushingMPC:
         ):
             return StationaryPlanarPushingTrajectory(self.config, current_slider_pose, current_pusher_pose, 1)
 
+        # Retrieve current and next mode
+        current_mode = self.original_path.pairs[segment_idx].mode
+        if segment_idx + 1 < len(self.original_path.pairs):
+            next_mode = self.original_path.pairs[segment_idx + 1].mode
+        else:
+            next_mode = None
+
         ################################################################################################################
         ### Double-plan trigger: replan from scratch once the pusher is 0.3s into the first non-collision mode that
         ### follows the last contact mode. We intentionally allow the pusher to leave contact before initiating the
         ### double plan so the pusher gains some velocity and is incentivized to actually move and do a human-looking
         ### correction (rather than doing some unrealistic-looking friction hacking).
         DOUBLE_PLAN_DELAY = 0.1  # seconds into the post-contact non-collision mode
-        current_mode = self.original_path.pairs[segment_idx].mode
         if not success and self.double_plan and isinstance(current_mode, NonCollisionMode):
             # Check whether every remaining mode (after the current one) is non-collision, meaning
             # we have already left the last contact mode.
@@ -787,6 +809,14 @@ class PlanarPushingMPC:
             )
         ################################################################################################################
 
+        # Remove velocity continuity constraint for the last planning cycle in non-collision mode if transitioning to
+        # another non-collision mode
+        remove_velocity_constraint = (
+            self._get_remaining_time_in_current_mode(t_local) <= 0.1 + 1e-3
+            and isinstance(current_mode, NonCollisionMode)
+            and next_mode is not None
+            and isinstance(next_mode, NonCollisionMode)
+        )
         self._update_initial_poses(
             current_slider_pose,
             current_pusher_pose,
@@ -794,6 +824,7 @@ class PlanarPushingMPC:
             current_pusher_velocity,
             collision_free_region=collision_free_region,
             soft_source_node_pose_constraint=True,
+            enforce_velocity_constraint=not remove_velocity_constraint,
         )
 
         path = self.planner.plan_path(
