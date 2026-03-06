@@ -5,6 +5,7 @@ trajectories_mpc/
 outputs/
 multirun/
 *.pkl
+small_t_pusher_regions.png
 
 # Vim
 *.swp

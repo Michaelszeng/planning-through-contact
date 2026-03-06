@@ -101,35 +101,34 @@ def get_triangle() -> RigidBody:
 
 def get_default_contact_cost() -> ContactCost:
     contact_cost = ContactCost(
-        keypoint_arc_length=1.0,
-        force_regularization=100000.0,  # NOTE: This is multiplied by 1e-4 because we have forces in other units in the optimization problem
-        keypoint_velocity_regularization=100.0,
-        trace=None,
-        # mode_transition_cost=None,
-        mode_transition_cost=15.0,
-        angular_velocity_regularization=65.0,
-        time=1.0,
+        keypoint_arc_length=0.0,  # original: 10.0
+        force_regularization=100000.0,  # original; NOTE: This is multiplied by 1e-4 because we have forces in other units in the optimization problem
+        keypoint_velocity_regularization=100.0,  # original
+        trace=None,  # original
+        mode_transition_cost=20.0,  # original: None
+        angular_velocity_regularization=10.0,  # original: not set at all
+        time=1.0,  # original
     )
     return contact_cost
 
 
 def get_default_non_collision_cost() -> NonCollisionCost:
     non_collision_cost = NonCollisionCost(
-        distance_to_object=0.3,
-        pusher_velocity_regularization=10.0,
-        pusher_arc_length=10.0,
+        distance_to_object=0.025,  # original: 0.025
+        pusher_velocity_regularization=10.0,  # original
+        pusher_arc_length=10.0,  # original
     )
     return non_collision_cost
 
 
 def get_double_plan_contact_cost() -> ContactCost:
     contact_cost = ContactCost(
-        keypoint_arc_length=0.1,
+        keypoint_arc_length=1.0,
         force_regularization=10000.0,
-        keypoint_velocity_regularization=50.0,
+        keypoint_velocity_regularization=100.0,
         trace=None,
-        # mode_transition_cost=1.0,
-        angular_velocity_regularization=500.0,
+        mode_transition_cost=5.0,
+        angular_velocity_regularization=250.0,
         time=1.0,
     )
     return contact_cost
@@ -137,9 +136,9 @@ def get_double_plan_contact_cost() -> ContactCost:
 
 def get_double_plan_non_collision_cost() -> NonCollisionCost:
     non_collision_cost = NonCollisionCost(
-        distance_to_object=0.25,
+        distance_to_object=0.025,
         pusher_velocity_regularization=10.0,
-        pusher_arc_length=2.0,
+        pusher_arc_length=4.0,
     )
     return non_collision_cost
 
@@ -229,9 +228,9 @@ def get_default_plan_config(
         slider_pusher_config = SliderPusherSystemConfig(
             slider=slider,
             pusher_radius=pusher_radius,
-            friction_coeff_slider_pusher=0.1,  # Slider uses mu=0.5, pusher uses mu=0.25
+            friction_coeff_slider_pusher=0.05,  # Slider uses mu=0.5, pusher uses mu=0.25
             friction_coeff_table_slider=0.5,
-            integration_constant=0.2,
+            integration_constant=0.3,
         )
         contact_cost = get_default_contact_cost()
         non_collision_cost = get_default_non_collision_cost()

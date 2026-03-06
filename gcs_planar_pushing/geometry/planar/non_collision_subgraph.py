@@ -5,7 +5,7 @@ from typing import Dict, List, Literal, NamedTuple, Optional, Tuple
 import numpy as np
 import numpy.typing as npt
 import pydrake.geometry.optimization as opt
-from pydrake.solvers import Binding, QuadraticCost
+from pydrake.solvers import Binding, LinearCost, QuadraticCost
 
 from gcs_planar_pushing.geometry.collision_geometry.collision_geometry import (
     ContactLocation,
@@ -38,7 +38,7 @@ def gcs_add_edge_with_continuity(
     incoming: VertexModePair,
     only_continuity_on_slider: bool = False,
     continuity_on_pusher_velocities: bool = False,
-) -> None:
+) -> GcsEdge:
     edge = gcs.AddEdge(outgoing.vertex, incoming.vertex)
     add_continuity_constraints_btwn_modes(
         outgoing.mode,
@@ -47,6 +47,15 @@ def gcs_add_edge_with_continuity(
         only_continuity_on_slider,
         continuity_on_pusher_velocities,
     )
+    # # Add mode transition cost on edges *entering* FaceContactMode vertices.
+    # # We use a LinearCost with zero coefficients on the edge's head variables
+    # # so that GCS perspectivizes it as cost * phi_e (correctly flow-weighted).
+    # if isinstance(incoming.mode, FaceContactMode):
+    #     c = incoming.mode.config.contact_config.cost.mode_transition_cost
+    #     if c is not None:
+    #         n = len(edge.xv())
+    #         evaluator = LinearCost(np.zeros(n), float(c))
+    #         edge.AddCost(Binding[LinearCost](evaluator, edge.xv()))
     return edge
 
 

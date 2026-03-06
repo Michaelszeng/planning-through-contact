@@ -82,7 +82,12 @@ class PlanarPushingMPC:
                 save_video=save_video,
                 interpolate_video=interpolate_video,
                 do_rounding=True,
-                save_traj=False,
+                save_traj=True,
+                save_relaxed=True,
+            )
+            print(
+                f"    🔍 path.relaxed_cost: {path.relaxed_cost}; path.rounded_cost: {path.rounded_cost} "
+                f"(path.rounded_result.is_success(): {path.rounded_result.is_success()})"
             )
             print("*" * 123)
             assert path is not None
@@ -113,7 +118,9 @@ class PlanarPushingMPC:
         self.previous_short_mode_vertex = None  # Optional[GcsVertex]
         self.current_segment_index = 1  # Start at second mode to skip source node
         self._was_in_contact = False
-        self._force_transition_next_iter = False
+
+        # Indicate whether we are currently executing the double plan (as opposed to the original plan).
+        self._executing_double_plan = False
 
     def load_original_path(self, filename: str) -> None:
         """Loads the original path from a file."""
@@ -124,7 +131,6 @@ class PlanarPushingMPC:
         self.original_traj_start_time = 0.0
         self.traj_start_time = 0.0
         self.current_segment_index = 1  # Start at second mode to skip source node
-        self._force_transition_next_iter = False
         print(f"Original Path Mode Sequence: {[pair.vertex.name() for pair in self.original_path.pairs]}")
 
     def _is_state_in_mode(
@@ -204,20 +210,6 @@ class PlanarPushingMPC:
         else:
             candidates = list(range(len(self.original_path.pairs)))  # All modes are candidates
 
-        # Handle deferred forced transition from previous iteration
-        if self._force_transition_next_iter:
-            self._force_transition_next_iter = False
-            next_idx = self.current_segment_index + 1
-            if next_idx < len(self.original_path.pairs) and isinstance(
-                self.original_path.pairs[next_idx].mode, NonCollisionMode
-            ):
-                print("Executing deferred forced transition to next mode")
-                segment_idx = next_idx
-                self.current_segment_index = segment_idx
-                mode = self.original_path.pairs[segment_idx].mode
-                collision_free_region = mode.contact_location
-                return segment_idx, collision_free_region
-
         # If there is contact
         if is_in_contact:
             current_mode = self.original_path.pairs[self.current_segment_index].mode
@@ -236,18 +228,16 @@ class PlanarPushingMPC:
                 remaining_time = self._get_remaining_time_in_current_mode(t)
                 next_idx = self.current_segment_index + 1
 
-                # If there is no time left in the contact mode, schedule a transition at the next iteration
+                # If there is no time left in the contact mode, force a transition to the next mode
                 if (
                     remaining_time <= 1e-3
                     and next_idx in candidates
                     and isinstance(self.original_path.pairs[next_idx].mode, NonCollisionMode)
                 ):
                     print(
-                        f"ℹ️ Scheduling forced transition at next iteration bc remaining time in contact mode "
-                        f"too small: {remaining_time}"
+                        f"ℹ️ Forcing transition to next mode bc remaining t in contact mode too small: {remaining_time}"
                     )
-                    self._force_transition_next_iter = True
-                    segment_idx = self.current_segment_index
+                    segment_idx = next_idx
                 # Otherwise, continue in the contact mode.
                 else:
                     valid_indices = [
@@ -261,6 +251,7 @@ class PlanarPushingMPC:
         # modes. We need to do an actual check based on the system state.
         else:
             candidates = [i for i in candidates if isinstance(self.original_path.pairs[i].mode, NonCollisionMode)]
+            print(f"candidates: {candidates}")
 
             # def _time_dist(idx: int) -> float:
             #     seg_start_time = self.original_traj.start_time if idx == 0 else self.original_traj.end_times[idx - 1]
@@ -283,20 +274,20 @@ class PlanarPushingMPC:
             ]
 
             if len(valid_indices) == 0:
-                raise ValueError(f"No mode is valid for the current state somehow. Candidates: {candidates}.")
-            #     if len(candidates) == 1:
-            #         print(
-            #             f"⚠️ WARNING: No mode is valid for the current state somehow. Candidates: {candidates}."
-            #             "Picking the only candidate mode."
-            #         )
-            #         segment_idx = candidates[0]
-            #     else:
-            #         print(
-            #             f"⚠️ WARNING: No mode is valid for the current state somehow. Candidates: {candidates}."
-            #             "Picking the second candidate mode."
-            #         )
-            #         # In the case that this happens at the transition between two non-collision modes, we pick the second
-            #         segment_idx = candidates[1]
+                # raise ValueError(f"No mode is valid for the current state somehow. Candidates: {candidates}.")
+                if len(candidates) == 1:
+                    print(
+                        f"⚠️ WARNING: No mode is valid for the current state somehow. Candidates: {candidates}."
+                        "Picking the only candidate mode."
+                    )
+                    segment_idx = candidates[0]
+                else:
+                    print(
+                        f"⚠️ WARNING: No mode is valid for the current state somehow. Candidates: {candidates}."
+                        "Picking the second candidate mode."
+                    )
+                    # In the case that this happens at the transition between two non-collision modes, we pick the 2nd
+                    segment_idx = candidates[1]
 
             # If only one mode is valid, use it
             elif len(valid_indices) == 1:
@@ -664,6 +655,9 @@ class PlanarPushingMPC:
         5) Solve the GCS convex restriction
         6) Optionally save trajectory and video outputs
         """
+        # FORCE DOUBLE PLAN TO ROUND SOLUTION
+        if self._executing_double_plan:
+            rounded = True
 
         # `t` stays as episode time throughout; `t_local` is original_traj-relative (starts at 0).
         t_local = t - self.original_traj_start_time
@@ -681,7 +675,7 @@ class PlanarPushingMPC:
             segment_idx == len(self.original_path.pairs) - 1
             and self._get_remaining_time_in_current_mode(t_local) <= 1e-3
         ):
-            return StationaryPlanarPushingTrajectory(self.config, current_slider_pose, current_pusher_pose, 1)
+            return StationaryPlanarPushingTrajectory(self.config, current_slider_pose, current_pusher_pose, 1), 0.0
 
         # Retrieve current and next mode
         current_mode = self.original_path.pairs[segment_idx].mode
@@ -743,7 +737,8 @@ class PlanarPushingMPC:
                         collision_free_region=collision_free_region,
                         soft_source_node_pose_constraint=False,
                     )
-                    path = self.planner.plan_path(self.solver_params, store_result=False, rounded=rounded)
+                    # FORCE DOUBLE PLAN TO ROUND SOLUTION
+                    path = self.planner.plan_path(self.solver_params, store_result=False, rounded=True)
 
                     # # Restore originals so subsequent normal MPC cycles are unaffected.
                     # cfg.time_in_contact = time_in_contact_cache
@@ -757,11 +752,12 @@ class PlanarPushingMPC:
                         self.traj_start_time = t
                         self.current_segment_index = 1
                         self._was_in_contact = False
+                        self._executing_double_plan = True
                         print(
                             "ℹ️ Double plan successful. New mode sequence: "
                             f"{[p.vertex.name() for p in self.original_path.pairs]}"
                         )
-                        return self.traj
+                        return self.traj, path.rounded_cost if rounded else path.relaxed_cost
                     else:
                         print("❌ Double plan failed. Continuing with original plan.")
         ################################################################################################################
@@ -783,7 +779,7 @@ class PlanarPushingMPC:
                         "Returning slice of original traj."
                     )
                     self._was_in_contact = True
-                    return self.traj.get_slice(t - self.traj_start_time)
+                    return self.traj.get_slice(t - self.traj_start_time), 0.0
         ################################################################################################################
 
         mode_sequence = self._get_remaining_mode_sequence(segment_idx=segment_idx)
@@ -830,8 +826,11 @@ class PlanarPushingMPC:
         path = self.planner.plan_path(
             self.solver_params, active_vertices=mode_sequence, store_result=False, rounded=rounded
         )
+        if path is None:
+            return None, None
         print(
-            f"    🔍 path.relaxed_cost: {path.relaxed_cost}; path.rounded_cost: {path.rounded_cost} (path.rounded_result.is_success(): {path.rounded_result.is_success()})"
+            f"    🔍 path.relaxed_cost: {path.relaxed_cost}; path.rounded_cost: {path.rounded_cost} "
+            f"(path.rounded_result.is_success(): {path.rounded_result.is_success()})"
         )
         self.traj = path.to_traj(rounded=rounded)
         self.traj_start_time = t
@@ -914,4 +913,4 @@ class PlanarPushingMPC:
                         print(f"Saved unrounded video to {output_folder}/{output_name}_unrounded")
 
         self._was_in_contact = is_in_contact
-        return self.traj
+        return self.traj, path.rounded_cost if rounded else path.relaxed_cost

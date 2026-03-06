@@ -234,13 +234,13 @@ class PlanarPlanConfig:
 
     # Soft slider target pose constraint (used for the target vertex).
     # These define the bounding box around the target pose when we use a soft constraint.
-    soft_slider_target_eps_pos: float = 0.015
-    soft_slider_target_eps_ang: float = 0.075
+    soft_slider_target_eps_pos: float = 0.025
+    soft_slider_target_eps_ang: float = 0.150
 
     # When the MPC "double plan" is triggered, we typically want to be less tolerant at the final pose.
     # If these are set, they override the eps values above during the double-plan re-formulation.
-    double_plan_soft_slider_target_eps_pos: float = 0.003
-    double_plan_soft_slider_target_eps_ang: float = 0.025
+    double_plan_soft_slider_target_eps_pos: float = 0.006
+    double_plan_soft_slider_target_eps_ang: float = 0.035
 
     # Optional shorter contact duration used only for the double-plan MPC re-formulation.
     # If None, uses the normal ``time_in_contact``.

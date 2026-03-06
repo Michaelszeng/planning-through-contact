@@ -26,6 +26,7 @@ from gcs_planar_pushing.geometry.collision_geometry.collision_geometry import (
     ContactLocation,
     PolytopeContactLocation,
 )
+from gcs_planar_pushing.geometry.hyperplane import Hyperplane
 from gcs_planar_pushing.geometry.planar.abstract_mode import (
     AbstractContactMode,
     AbstractModeVariables,
@@ -247,13 +248,17 @@ class NonCollisionMode(AbstractContactMode):
 
         self.dt = self.time_in_mode / self.num_knot_points
 
+        # Small inflation so adjacent regions overlap by 2*EPS at shared boundaries,
+        # preventing the MPC from failing to assign a region when the pusher is near a corner.
+        EPS = 1e-2
         self.contact_planes = self.slider_geometry.get_contact_planes(self.contact_location.idx)
         # TODO(bernhardpg): This class should not have a contact_location object. it is not accurate,
         # as it really only has the index of a collision free set, which may or may not correspond
         # 1-1 to a
-        self.collision_free_space_planes = self.slider_geometry.get_planes_for_collision_free_region(
-            self.contact_location.idx
-        )
+        self.collision_free_space_planes = [
+            Hyperplane(p.a, p.b - EPS)
+            for p in self.slider_geometry.get_planes_for_collision_free_region(self.contact_location.idx)
+        ]
         self.prog = MathematicalProgram()
         self.variables = NonCollisionVariables.from_prog(
             self.prog,
@@ -413,8 +418,8 @@ class NonCollisionMode(AbstractContactMode):
             # angle_cost = W_ANG * (1 - cos_t * self.variables.cos_th - sin_t * self.variables.sin_th)
             # self.prog.AddLinearCost(angle_cost)
         else:
-            W_POS = 1e6
-            W_ANG = 1e4
+            W_POS = 1e5
+            W_ANG = 2e3
             EPS_POS = float(getattr(self.config, "soft_slider_target_eps_pos", 0.015))
             EPS_ANG = float(getattr(self.config, "soft_slider_target_eps_ang", 0.075))
 
@@ -446,7 +451,7 @@ class NonCollisionMode(AbstractContactMode):
         if not soft_source_node_pose_constraint:
             self.prog.AddLinearConstraint(eq(self.variables.p_BPs[0], pose.pos()))
         else:
-            W = 1e7
+            W = 1e6
             EPS_XY = 0.00125
 
             p = pose.pos().flatten()

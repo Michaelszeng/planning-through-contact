@@ -8,6 +8,7 @@ import pydrake.geometry.optimization as opt
 import pydrake.symbolic as sym
 from pydrake.solvers import (
     CommonSolverOption,
+    LinearCost,
     MathematicalProgram,
     MathematicalProgramResult,
     SnoptSolver,
@@ -118,11 +119,19 @@ def get_mode_variables_from_constraint_variables(
     return mode_vars
 
 
-def add_edge_constraints_to_prog(edges: List[GcsEdge], prog: MathematicalProgram, pairs: List[VertexModePair]) -> None:
+def add_edge_costs_constraints_to_prog(
+    edges: List[GcsEdge], prog: MathematicalProgram, pairs: List[VertexModePair]
+) -> None:
     for edge, (pair_u, pair_v) in zip(edges, zip(pairs[:-1], pairs[1:])):
         for c in edge.GetConstraints():
             vars = get_mode_variables_from_constraint_variables(c.variables(), pair_u, pair_v)
             prog.AddConstraint(c.evaluator(), vars)
+        # for c in edge.GetCosts():
+        #     evaluator = c.evaluator()
+        #     n_vars = c.variables().size
+        #     val = float(evaluator.Eval(np.zeros(n_vars)))
+        #     if val != 0:
+        #         prog.AddCost(val)
 
 
 class LoadedMathematicalProgramResult:
@@ -492,7 +501,7 @@ class PlanarPushingPath:
 
     def _construct_nonlinear_program(self) -> MathematicalProgram:
         prog = assemble_progs_from_contact_modes([p.mode for p in self.pairs])
-        add_edge_constraints_to_prog(self.edges, prog, self.pairs)
+        add_edge_costs_constraints_to_prog(self.edges, prog, self.pairs)
         return prog
 
     def _get_initial_guess_as_orig_variables(self, scale_rot_values: bool = True) -> npt.NDArray[np.float64]:
