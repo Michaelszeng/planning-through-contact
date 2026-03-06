@@ -30,12 +30,8 @@ class BandSparseSemidefiniteRelaxation:
         self.linear_equality_constraints = {idx: [] for idx in range(num_groups)}
 
         # Quadratic constraints and costs is what couples the groups
-        self.quadratic_constraints = {
-            (i, j): [] for i, j in zip(range(num_groups - 1), range(1, num_groups))
-        }
-        self.quadratic_costs = {
-            (i, j): [] for i, j in zip(range(num_groups - 1), range(1, num_groups))
-        }
+        self.quadratic_constraints = {(i, j): [] for i, j in zip(range(num_groups - 1), range(1, num_groups))}
+        self.quadratic_costs = {(i, j): [] for i, j in zip(range(num_groups - 1), range(1, num_groups))}
 
         # Constraints that will just be added directly to SDP and will not be multiplied
         self.independent_constraints = []
@@ -91,9 +87,7 @@ class BandSparseSemidefiniteRelaxation:
 
         return constraint
 
-    def add_quadratic_constraint(
-        self, group_idx_1: int, group_idx_2: int, *args, **kwargs
-    ):
+    def add_quadratic_constraint(self, group_idx_1: int, group_idx_2: int, *args, **kwargs):
         group_idx_1 = self._find_numbered_idx(group_idx_1)
         group_idx_2 = self._find_numbered_idx(group_idx_2)
 
@@ -135,7 +129,8 @@ class BandSparseSemidefiniteRelaxation:
 
     # TODO(bernhardpg): Temporary function to make it possible to use my old code
     def _make_bbox_to_expr(
-        self, bounding_box_bindings: List[Binding[BoundingBoxConstraint]]  # type: ignore
+        self,
+        bounding_box_bindings: List[Binding[BoundingBoxConstraint]],  # type: ignore
     ) -> NpExpressionArray:
         bounding_box_constraints = []
         for b in bounding_box_bindings:
@@ -162,10 +157,7 @@ class BandSparseSemidefiniteRelaxation:
         relaxed_prog = MathematicalProgram()
 
         # First gather variables
-        self.xs = {
-            idx: np.concatenate(self.groups[idx]).reshape((-1, 1))
-            for idx in range(self.num_groups)
-        }
+        self.xs = {idx: np.concatenate(self.groups[idx]).reshape((-1, 1)) for idx in range(self.num_groups)}
 
         # Form smaller PSD cones
         self.Xs = {}
@@ -283,9 +275,7 @@ class BandSparseSemidefiniteRelaxation:
             x = self.xs[idx]
             y = self.xs[idx + 1]
             ineqs_i = [
-                ineq
-                for ineq in self.linear_inequality_constraints[idx]
-                if isinstance(ineq, Binding[LinearConstraint])
+                ineq for ineq in self.linear_inequality_constraints[idx] if isinstance(ineq, Binding[LinearConstraint])
             ]
             bboxs_i = [
                 ineq
@@ -304,12 +294,8 @@ class BandSparseSemidefiniteRelaxation:
             ]
 
             # [b A][1; x] >= 0
-            A = linear_bindings_to_homogenuous_form(
-                ineqs_i, self._make_bbox_to_expr(bboxs_i), x
-            )
-            B = linear_bindings_to_homogenuous_form(
-                ineqs_j, self._make_bbox_to_expr(bboxs_j), y
-            )
+            A = linear_bindings_to_homogenuous_form(ineqs_i, self._make_bbox_to_expr(bboxs_i), x)
+            B = linear_bindings_to_homogenuous_form(ineqs_j, self._make_bbox_to_expr(bboxs_j), y)
 
             x_len = len(x)
             y_len = len(y)
@@ -367,18 +353,13 @@ class BandSparseSemidefiniteRelaxation:
                     SCALE = 1.0
 
                 idxs_map = {
-                    k: l
-                    for k, var_k in enumerate(vars)
-                    for l, var_l in enumerate(x.flatten())
-                    if var_k.EqualTo(var_l)
+                    k: l for k, var_k in enumerate(vars) for l, var_l in enumerate(x.flatten()) if var_k.EqualTo(var_l)
                 }
                 var_idxs = [(idxs_map[i], idxs_map[j]) for i, j in Q_idxs]
 
                 if i == self.num_groups - 1:  # Last group
                     assert i == j  # for the last group, we can not have j bigger than i
-                    X = self.Xs[
-                        i - 1
-                    ]  # for the last group we need to pick the last part of the previous X
+                    X = self.Xs[i - 1]  # for the last group we need to pick the last part of the previous X
                 else:
                     X = self.Xs[i]
                 X_vars = np.array([X[k, l] for (k, l) in var_idxs])
@@ -421,18 +402,13 @@ class BandSparseSemidefiniteRelaxation:
                     x = self.xs[i]
 
                 idxs_map = {
-                    k: l
-                    for k, var_k in enumerate(vars)
-                    for l, var_l in enumerate(x.flatten())
-                    if var_k.EqualTo(var_l)
+                    k: l for k, var_k in enumerate(vars) for l, var_l in enumerate(x.flatten()) if var_k.EqualTo(var_l)
                 }
                 var_idxs = [(idxs_map[i], idxs_map[j]) for i, j in Q_idxs]
 
                 if i == self.num_groups - 1:  # Last group
                     assert i == j  # for the last group, we can not have j bigger than i
-                    X = self.Xs[
-                        i - 1
-                    ]  # for the last group we need to pick the last part of the previous X
+                    X = self.Xs[i - 1]  # for the last group we need to pick the last part of the previous X
                 else:
                     X = self.Xs[i]
 
@@ -482,15 +458,11 @@ class BandSparseSemidefiniteRelaxation:
         for idx in range(self.num_groups - 1):
             x = self.xs[idx].flatten()
             X = self.Xs[idx]
-            big_X[count : count + len(x), count : count + len(x)] = X[
-                : len(x), : len(x)
-            ]
+            big_X[count : count + len(x), count : count + len(x)] = X[: len(x), : len(x)]
             count += len(x)
 
         x = self.xs[self.num_groups - 1].flatten()
-        big_X[count : count + len(x), count : count + len(x)] = self.Xs[
-            self.num_groups - 2
-        ][-len(x) :, -len(x) :]
+        big_X[count : count + len(x), count : count + len(x)] = self.Xs[self.num_groups - 2][-len(x) :, -len(x) :]
 
         return big_X
 
@@ -499,9 +471,7 @@ class BandSparseSemidefiniteRelaxation:
         self.relaxed_prog = MakeSemidefiniteRelaxation(self.prog)
 
         if trace_cost is not None:
-            assert (
-                len(self.relaxed_prog.positive_semidefinite_constraints()) == 1
-            )  # should only be one big X
+            assert len(self.relaxed_prog.positive_semidefinite_constraints()) == 1  # should only be one big X
             X = self.relaxed_prog.positive_semidefinite_constraints()[0].variables()
             N = np.sqrt(len(X))
             assert int(N) == N

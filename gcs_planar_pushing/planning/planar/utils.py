@@ -433,12 +433,12 @@ def create_plan(
         skipped and plan_path is called directly. debug/save_analysis modes are also skipped.
     """
     # Set up folders
-    folder_name = f"{output_folder}/{output_name}"
+    folder_name = os.path.join(output_folder, output_name) if output_folder else output_name
     video_folder = folder_name
     os.makedirs(folder_name, exist_ok=True)
-    trajectory_folder = f"{folder_name}/trajectory"
+    trajectory_folder = os.path.join(folder_name, "trajectory")
     os.makedirs(trajectory_folder, exist_ok=True)
-    analysis_folder = f"{folder_name}/analysis"
+    analysis_folder = os.path.join(folder_name, "analysis")
     if save_analysis or debug:
         os.makedirs(analysis_folder, exist_ok=True)
 
