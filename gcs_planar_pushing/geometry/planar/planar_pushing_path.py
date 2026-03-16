@@ -126,12 +126,12 @@ def add_edge_costs_constraints_to_prog(
         for c in edge.GetConstraints():
             vars = get_mode_variables_from_constraint_variables(c.variables(), pair_u, pair_v)
             prog.AddConstraint(c.evaluator(), vars)
-        # for c in edge.GetCosts():
-        #     evaluator = c.evaluator()
-        #     n_vars = c.variables().size
-        #     val = float(evaluator.Eval(np.zeros(n_vars)))
-        #     if val != 0:
-        #         prog.AddCost(val)
+        for c in edge.GetCosts():
+            evaluator = c.evaluator()
+            n_vars = c.variables().size
+            val = float(evaluator.Eval(np.zeros(n_vars)))
+            if val != 0:
+                prog.AddCost(val)
 
 
 class LoadedMathematicalProgramResult:
@@ -549,6 +549,7 @@ class PlanarPushingPath:
         """
         Assembles one big nonlinear program and solves it with the SDP relaxation as the initial guess.
 
+        NOTE: This does not re-optimize the mode sequence.
         NOTE: Ipopt does not work because of "too few degrees of freedom". Snopt must be used.
         """
         prog = self._construct_nonlinear_program()

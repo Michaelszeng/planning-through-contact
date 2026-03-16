@@ -250,7 +250,7 @@ class NonCollisionMode(AbstractContactMode):
 
         # Small inflation so adjacent regions overlap by 2*EPS at shared boundaries,
         # preventing the MPC from failing to assign a region when the pusher is near a corner.
-        EPS = 1e-2
+        EPS = 1e-3
         self.contact_planes = self.slider_geometry.get_contact_planes(self.contact_location.idx)
         # TODO(bernhardpg): This class should not have a contact_location object. it is not accurate,
         # as it really only has the index of a collision free set, which may or may not correspond
@@ -553,7 +553,7 @@ class NonCollisionMode(AbstractContactMode):
         # TODO: Currently, some tests will fail if this is not enabled (as the sets are unbounded)
         # TODO: This will be handled soon
         if make_bounded:
-            BOUND = 3  # TODO(bernhardpg): this should not be hardcoded
+            BOUND = 1  # TODO(bernhardpg): this should not be hardcoded
             ub = np.full((temp_prog.num_vars(),), BOUND)
             temp_prog.AddBoundingBoxConstraint(-ub, ub, temp_prog.decision_variables())
 
