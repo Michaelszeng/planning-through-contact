@@ -356,9 +356,7 @@ class PlanarPushingPlanner:
 
         if solver_params.save_solver_output:
             filename = (
-                solver_params.solver_output_filename
-                if solver_params.solver_output_filename
-                else "solver_log.txt"
+                solver_params.solver_output_filename if solver_params.solver_output_filename else "solver_log.txt"
             )
             solver_options.SetOption(CommonSolverOption.kPrintFileName, filename)  # type: ignore
 
@@ -566,18 +564,18 @@ class PlanarPushingPlanner:
         else:
             raise NotImplementedError("Must enable rounding steps")
 
-    def _pick_best_path(self, paths: List[PlanarPushingPath]) -> PlanarPushingPath:
+    def _pick_best_path(self, paths: List[PlanarPushingPath], rounded: bool = True) -> PlanarPushingPath:
         """
-        Picks the best path from a list of paths based on the rounded cost.
+        Picks the best path from a list of paths.
+        When rounded=True, selects by rounded (nonlinear rounding) cost.
+        When rounded=False, selects by relaxed (ConvexRestriction) cost.
         """
-        rounded_costs = [
-            p.rounded_result.get_optimal_cost()
-            for p in paths
-            if p.rounded_result is not None  # type
-        ]
-        best_idx = np.argmin(rounded_costs)
-        path = paths[best_idx]
-        return path
+        if rounded:
+            costs = [p.rounded_result.get_optimal_cost() for p in paths if p.rounded_result is not None]
+        else:
+            costs = [p.relaxed_cost for p in paths]
+        best_idx = np.argmin(costs)
+        return paths[best_idx]
 
     def plan_path(
         self,
@@ -602,12 +600,12 @@ class PlanarPushingPlanner:
             print(f"    =====================================> _get_rounded_paths time: {time.time() - start}")
             if feasible_paths is None:
                 print("*" * 60 + "\n❌ WARNING: Rounding returned no feasible paths!\n")
-                print("*" * 60 + "\n           Returning unrounded path.\n" + "*" * 60)
-                self.path = paths[0]
+                print("*" * 60 + "\n            Returning unrounded path.\n" + "*" * 60)
+                self.path = self._pick_best_path(paths, rounded=False)
                 return self.path
-            self.path = feasible_paths[0] if active_vertices is None else self._pick_best_path(feasible_paths)
+            self.path = self._pick_best_path(feasible_paths, rounded=True)
         else:
-            self.path = paths[0]
+            self.path = self._pick_best_path(paths, rounded=False)
 
         if solver_params.print_path:
             print(f"path: {self.path.get_path_names()}")
