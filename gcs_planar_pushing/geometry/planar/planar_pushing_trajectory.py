@@ -726,16 +726,6 @@ class PlanarPushingTrajectory(AbstractPlanarPushingTrajectory):
             else:  # FaceContactVariables
                 R_WB = self.path_knot_points[segment_idx].R_WBs[t_idx]
 
-            # Normalize R_WB to be a valid rotation matrix for visualization
-            # R_WB is [[c, -s], [s, c]]
-            c = R_WB[0, 0]
-            s = R_WB[1, 0]
-            norm = np.sqrt(c * c + s * s)
-            if norm > 1e-6:
-                R_WB = R_WB / norm
-            else:
-                R_WB = np.eye(2)
-
             temp = np.eye(3)
             temp[:2, :2] = R_WB
             return temp
