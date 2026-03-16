@@ -47,15 +47,15 @@ def gcs_add_edge_with_continuity(
         only_continuity_on_slider,
         continuity_on_pusher_velocities,
     )
-    # # Add mode transition cost on edges *entering* FaceContactMode vertices.
-    # # We use a LinearCost with zero coefficients on the edge's head variables
-    # # so that GCS perspectivizes it as cost * phi_e (correctly flow-weighted).
-    # if isinstance(incoming.mode, FaceContactMode):
-    #     c = incoming.mode.config.contact_config.cost.mode_transition_cost
-    #     if c is not None:
-    #         n = len(edge.xv())
-    #         evaluator = LinearCost(np.zeros(n), float(c))
-    #         edge.AddCost(Binding[LinearCost](evaluator, edge.xv()))
+    # Add mode transition cost on edges *entering* FaceContactMode vertices.
+    # We use a LinearCost with zero coefficients on the edge's head variables
+    # so that GCS perspectivizes it as cost * phi_e (correctly flow-weighted).
+    if isinstance(incoming.mode, FaceContactMode):
+        c = incoming.mode.config.contact_config.cost.mode_transition_cost
+        if c is not None:
+            n = len(edge.xv())
+            evaluator = LinearCost(np.zeros(n), float(c))
+            edge.AddCost(Binding[LinearCost](evaluator, edge.xv()))
     return edge
 
 

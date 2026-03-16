@@ -463,9 +463,9 @@ class FaceContactMode(AbstractContactMode):
     def _define_costs(self) -> None:
         cost_config = self.config.contact_config.cost
 
-        if cost_config.mode_transition_cost is not None:
-            cost = self.prog_wrapper.add_independent_cost(cost_config.mode_transition_cost)  # type: ignore
-            self.costs["mode_cost"].append(cost)
+        # if cost_config.mode_transition_cost is not None:
+        #     cost = self.prog_wrapper.add_independent_cost(cost_config.mode_transition_cost)  # type: ignore
+        #     self.costs["mode_cost"].append(cost)
 
         if cost_config.time is not None:
             c_1 = cost_config.time * self.variables.dt
