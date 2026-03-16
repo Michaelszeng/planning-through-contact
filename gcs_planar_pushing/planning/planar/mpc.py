@@ -325,55 +325,55 @@ class PlanarPushingMPC:
 
         return segment_idx, collision_free_region
 
-    def _get_closest_time_and_segment(
-        self,
-        current_slider_pose: PlanarPose,
-        current_pusher_pose: Optional[PlanarPose],
-    ) -> Tuple[float, int]:
-        """
-        Finds the time t and segment index on the original trajectory that minimizes the distance to the current state.
-        """
-        traj = self.original_traj
+    # def _get_closest_time_and_segment(
+    #     self,
+    #     current_slider_pose: PlanarPose,
+    #     current_pusher_pose: Optional[PlanarPose],
+    # ) -> Tuple[float, int]:
+    #     """
+    #     Finds the time t and segment index on the original trajectory that minimizes the distance to the current state.
+    #     """
+    #     traj = self.original_traj
 
-        target_slider = current_slider_pose
-        target_pusher = current_pusher_pose
+    #     target_slider = current_slider_pose
+    #     target_pusher = current_pusher_pose
 
-        # Helper to compute distance
-        def _dist_at_t(t_: float) -> float:
-            slider_pose = traj.get_slider_planar_pose(t_)
-            pusher_pose = traj.get_pusher_planar_pose(t_)
+    #     # Helper to compute distance
+    #     def _dist_at_t(t_: float) -> float:
+    #         slider_pose = traj.get_slider_planar_pose(t_)
+    #         pusher_pose = traj.get_pusher_planar_pose(t_)
 
-            # Position error
-            pos_err = np.linalg.norm(slider_pose.pos() - target_slider.pos())
+    #         # Position error
+    #         pos_err = np.linalg.norm(slider_pose.pos() - target_slider.pos())
 
-            # Angle error (handle wrapping)
-            th_err = np.abs(slider_pose.theta - target_slider.theta)
-            th_err = min(th_err, 2 * np.pi - th_err)
+    #         # Angle error (handle wrapping)
+    #         th_err = np.abs(slider_pose.theta - target_slider.theta)
+    #         th_err = min(th_err, 2 * np.pi - th_err)
 
-            # Pusher error
-            pusher_err = 0.0
-            if target_pusher is not None:
-                pusher_err = np.linalg.norm(pusher_pose.pos() - target_pusher.pos())
+    #         # Pusher error
+    #         pusher_err = 0.0
+    #         if target_pusher is not None:
+    #             pusher_err = np.linalg.norm(pusher_pose.pos() - target_pusher.pos())
 
-            return pos_err + 0.5 * th_err + pusher_err
+    #         return pos_err + 0.5 * th_err + pusher_err
 
-        # Coarse search over the trajectory
-        NUM_STEPS = 100
-        ts = np.linspace(traj.start_time, traj.end_time, NUM_STEPS)
-        dists = [_dist_at_t(t) for t in ts]
-        best_idx = np.argmin(dists)
-        best_t = ts[best_idx]
+    #     # Coarse search over the trajectory
+    #     NUM_STEPS = 100
+    #     ts = np.linspace(traj.start_time, traj.end_time, NUM_STEPS)
+    #     dists = [_dist_at_t(t) for t in ts]
+    #     best_idx = np.argmin(dists)
+    #     best_t = ts[best_idx]
 
-        # Identify the segment index using the trajectory logic
-        if hasattr(traj, "_get_curr_segment_idx"):
-            segment_idx = traj._get_curr_segment_idx(best_t)  # type: ignore
-        else:
-            if best_t >= traj.end_time:
-                segment_idx = len(traj.traj_segments) - 1
-            else:
-                segment_idx = np.where(best_t < traj.end_times)[0][0]
+    #     # Identify the segment index using the trajectory logic
+    #     if hasattr(traj, "_get_curr_segment_idx"):
+    #         segment_idx = traj._get_curr_segment_idx(best_t)  # type: ignore
+    #     else:
+    #         if best_t >= traj.end_time:
+    #             segment_idx = len(traj.traj_segments) - 1
+    #         else:
+    #             segment_idx = np.where(best_t < traj.end_times)[0][0]
 
-        return best_t, int(segment_idx)
+    #     return best_t, int(segment_idx)
 
     def _get_remaining_mode_sequence(
         self,

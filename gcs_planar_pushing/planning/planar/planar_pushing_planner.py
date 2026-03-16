@@ -355,7 +355,12 @@ class PlanarPushingPlanner:
             solver_options.SetOption(CommonSolverOption.kPrintToConsole, 1)  # type: ignore
 
         if solver_params.save_solver_output:
-            solver_options.SetOption(CommonSolverOption.kPrintFileName, "solver_log.txt")  # type: ignore
+            filename = (
+                solver_params.solver_output_filename
+                if solver_params.solver_output_filename
+                else "solver_log.txt"
+            )
+            solver_options.SetOption(CommonSolverOption.kPrintFileName, filename)  # type: ignore
 
         mosek = MosekSolver()
         solver_options.SetOption(mosek.solver_id(), "MSK_DPAR_INTPNT_CO_TOL_PFEAS", tolerance)

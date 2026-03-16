@@ -104,6 +104,7 @@ class PlanarSolverParams:
     assert_nan_values: bool = True
     print_solver_output: bool = False
     save_solver_output: bool = False
+    solver_output_filename: Optional[str] = None
     measure_solve_time: bool = False
     max_mosek_solve_time: float = 300.0
     print_path: bool = False

@@ -438,6 +438,7 @@ def create_plan(
     os.makedirs(folder_name, exist_ok=True)
     trajectory_folder = os.path.join(folder_name, "trajectory")
     os.makedirs(trajectory_folder, exist_ok=True)
+    solver_params.solver_output_filename = os.path.join(trajectory_folder, "solver_log.txt")
     analysis_folder = os.path.join(folder_name, "analysis")
     if save_analysis or debug:
         os.makedirs(analysis_folder, exist_ok=True)
