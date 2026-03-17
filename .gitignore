@@ -3,6 +3,7 @@ demos/
 trajectories/
 outputs/
 multirun/
+trajectories_mpc/
 
 # Vim
 *.swp

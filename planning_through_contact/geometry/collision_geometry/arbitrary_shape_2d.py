@@ -1,0 +1,830 @@
+"""
+Automatically generated version of the TPusher2d class.
+"""
+
+import logging
+import pickle
+from dataclasses import dataclass
+from functools import cached_property
+from typing import Any, Dict, List, Optional, Tuple
+
+import numpy as np
+import numpy.typing as npt
+from pydrake.geometry import Shape as DrakeShape
+from pydrake.math import RigidTransform
+
+from planning_through_contact.geometry.collision_geometry.box_2d import Box2d
+from planning_through_contact.geometry.collision_geometry.collision_geometry import (
+    CollisionGeometry,
+    ContactLocation,
+    PolytopeContactLocation,
+)
+from planning_through_contact.geometry.hyperplane import (
+    Hyperplane,
+    construct_2d_plane_from_points,
+)
+from planning_through_contact.geometry.utilities import normalize_vec
+
+
+def load_primitive_info(primitive_info_file: str) -> List[Dict[str, Any]]:
+    with open(primitive_info_file, "rb") as f:
+        primitive_info = pickle.load(f)
+    return primitive_info
+
+
+def compute_box_vertices(box):
+    # Extract size and transformation matrix
+    size = box["size"]
+    transform = box["transform"]
+
+    # Calculate the half-size for convenience
+    half_size_x = size[0] / 2
+    half_size_y = size[1] / 2
+
+    # Define the relative corner points (vertices) of the box
+    relative_vertices = np.array(
+        [
+            [-half_size_x, -half_size_y, 0, 1],  # Bottom-left
+            [half_size_x, -half_size_y, 0, 1],  # Bottom-right
+            [half_size_x, half_size_y, 0, 1],  # Top-right
+            [-half_size_x, half_size_y, 0, 1],  # Top-left
+        ]
+    )
+
+    # Apply the transformation matrix to each vertex
+    vertices = [transform @ vertex for vertex in relative_vertices]
+
+    # Extract only the x and y components to return 2D vertices
+    vertices_2d = [(vertex[0], vertex[1]) for vertex in vertices]
+
+    return vertices_2d
+
+
+def is_point_on_box_edge(point, box):
+    """Check if the point is on the edge of the box."""
+    x, y = point
+    left, right, bottom, top = compute_box_bounds(box)
+    return (x == left or x == right) and bottom <= y <= top or (y == bottom or y == top) and left <= x <= right
+
+
+def compute_intersection_points(boxes):
+    intersections = []
+
+    # Assuming that boxes are axis-aligned and do not rotate
+    for i, box1 in enumerate(boxes):
+        # Compute the edges for box1
+        left1, right1, bottom1, top1 = compute_box_bounds(box1)
+
+        for j, box2 in enumerate(boxes):
+            if i == j:  # Skip comparing the box with itself
+                continue
+
+            # Compute the edges for box2
+            left2, right2, bottom2, top2 = compute_box_bounds(box2)
+
+            # Check for horizontal overlap
+            if left1 < right2 and right1 > left2:
+                # Check for vertical overlap
+                if bottom1 < top2 and top1 > bottom2:
+                    # Calculate the intersection points
+                    horizontal_overlap = [max(left1, left2), min(right1, right2)]
+                    vertical_overlap = [max(bottom1, bottom2), min(top1, top2)]
+
+                    # There are only 2 actual intersection points where the edges overlap
+                    candidates = [
+                        (horizontal_overlap[0], vertical_overlap[0]),
+                        (horizontal_overlap[0], vertical_overlap[1]),
+                        (horizontal_overlap[1], vertical_overlap[0]),
+                        (horizontal_overlap[1], vertical_overlap[1]),
+                    ]
+                    for candidate in candidates:
+                        if not is_inside_box(box1, candidate) and not is_inside_box(box2, candidate):
+                            intersections.append(candidate)
+
+    # The intersection points calculated above include the corners of the overlapping area,
+    # we need to filter out the points that are not actually intersection of the edges
+    actual_intersections = []
+    for point in intersections:
+        if any(is_point_on_box_edge(point, box) for box in boxes):
+            actual_intersections.append(point)
+
+    return list(set(actual_intersections))  # Remove duplicates and return
+
+
+def is_inside_box(box, point):
+    """Check if a 2D point is inside the 2D rectangle on the XY plane defined by `box`.
+    This returns False if the point is on the boundary of the box."""
+    # Extract size and transformation matrix
+    size = box["size"]
+    transform = box["transform"]
+
+    # Center of the box
+    center_x = transform[0, 3]
+    center_y = transform[1, 3]
+
+    # Half-sizes of the box
+    half_size_x = size[0] / 2
+    half_size_y = size[1] / 2
+
+    # Calculate the edges of the box
+    left_edge = center_x - half_size_x
+    right_edge = center_x + half_size_x
+    bottom_edge = center_y - half_size_y
+    top_edge = center_y + half_size_y
+
+    # Point coordinates
+    x, y = point
+
+    # Check if the point is inside the box boundaries
+    is_inside = left_edge < x < right_edge and bottom_edge < y < top_edge
+
+    return is_inside
+
+
+def is_inside_any_box(boxes, point):
+    # Check if the vertex is inside any of the boxes
+    for box in boxes:
+        if is_inside_box(box, point):
+            return True
+    return False
+
+
+def compute_box_bounds(box):
+    # Extract size and transformation matrix
+    size = box["size"]
+    transform = box["transform"]
+
+    # Get the center position
+    center_x = transform[0, 3]
+    center_y = transform[1, 3]
+
+    # Calculate the edges
+    left = center_x - size[0] / 2
+    right = center_x + size[0] / 2
+    bottom = center_y - size[1] / 2
+    top = center_y + size[1] / 2
+
+    return left, right, bottom, top
+
+
+def compute_outer_vertices(boxes):
+    # Compute all vertices and check if they are inside any other box
+    box_vertices = [compute_box_vertices(box) for box in boxes]
+    flattened_vertices = [vertex for vertices in box_vertices for vertex in vertices]
+    intersection_points = compute_intersection_points(boxes)
+    unique_points = list(set(flattened_vertices + intersection_points))
+    outer_vertices = []
+    for point in unique_points:
+        if not is_inside_any_box(boxes, point):
+            outer_vertices.append(point)
+    return np.array(outer_vertices)
+
+
+def connect_all_points(points):
+    """Generate all possible edges between the given points."""
+    edges = []
+    for i in range(len(points)):
+        for j in range(i + 1, len(points)):
+            edges.append((points[i], points[j]))
+    return edges
+
+
+def filter_axis_aligned_edges(edges):
+    """Filter out edges that are not perfectly horizontal or vertical."""
+    axis_aligned_edges = []
+
+    for edge in edges:
+        (start_x, start_y), (end_x, end_y) = edge
+        # Check if the edge is horizontal (same y) or vertical (same x)
+        if start_x == end_x or start_y == end_y:
+            axis_aligned_edges.append(edge)
+
+    return axis_aligned_edges
+
+
+def line_intersects_box(line, box, num_samples=10):
+    p1, p2 = line
+
+    # Sample points along the line. Don't include the endpoints.
+    x_values = np.linspace(p1[0], p2[0], num_samples + 2)[1:-1]
+    y_values = np.linspace(p1[1], p2[1], num_samples + 2)[1:-1]
+    points = np.column_stack((x_values, y_values))
+
+    # Check if any of the points is inside the box
+    for point in points:
+        if is_inside_box(box, point):
+            return True
+    return False
+
+
+def filter_edges_with_collision(edges, boxes):
+    """Filter out all edges whose non-endpoints part is inside another box."""
+    filtered_edges = []
+    for edge in edges:
+        intersects = False
+        for box in boxes:
+            if line_intersects_box(edge, box):
+                intersects = True
+                break
+        if not intersects:
+            filtered_edges.append(edge)
+    return filtered_edges
+
+
+def compute_outer_edges(vertices, boxes):
+    edges = connect_all_points(vertices)
+    axis_aligned_edges = filter_axis_aligned_edges(edges)
+    outer_edges = filter_edges_with_collision(axis_aligned_edges, boxes)
+    return outer_edges
+
+
+def find_next_edge(edges, current_edge):
+    """
+    Find the next edge that connects to the current edge.
+    """
+    last_vertex = current_edge[1]  # The end vertex of the current edge
+    for edge in edges:
+        if np.array_equal(edge[0], last_vertex):
+            return edge
+        if np.array_equal(edge[1], last_vertex):
+            return (edge[1], edge[0])  # Reverse the edge if needed
+    return None
+
+
+def direct_edges_so_right_points_inside(edges, boxes):
+    """
+    Flip edges so that the right side next to the edge is inside a box.
+    """
+    width, height = compute_union_dimensions(boxes)
+    scale = min(width, height) / 1000
+
+    directed_edges = []
+    for edge in edges:
+        # Compute the midpoint of the edge.
+        midpoint = (edge[0] + edge[1]) / 2
+
+        # Compute point to the right of the edge.
+        start, end = edge
+        diff0 = end[0] - start[0]
+        diff1 = end[1] - start[1]
+        normal = np.array([diff1, -diff0])
+        normal /= np.linalg.norm(normal)
+        normal *= scale * 100  # Scale for visualization
+        scaled_normal = normal * scale  # Scale for collision checking
+        right_point = (midpoint[0] + scaled_normal[0], midpoint[1] + scaled_normal[1])
+
+        # Check if the right point is inside a box.
+        if is_inside_any_box(boxes, right_point):
+            directed_edges.append(edge)
+        else:
+            directed_edges.append((edge[1], edge[0]))
+
+    return directed_edges
+
+
+def order_edges_by_connectivity(edges, boxes):
+    """
+    Order edges by greedy connectivity starting from an arbitrary edge.
+    Ensures that the first vertex of the first edge is not an intersection vertex.
+    """
+    if not edges:
+        return []
+
+    # Convert edges to tuple format if they are numpy arrays
+    edges = [(tuple(edge[0]), tuple(edge[1])) if isinstance(edge[0], np.ndarray) else edge for edge in edges]
+
+    # Start with edge that has highest y-coordinate of the first vertex.
+    edges.sort(key=lambda edge: edge[0][1], reverse=True)
+
+    intersection_vertices = compute_intersection_points(boxes)
+    if edges[0][0] in intersection_vertices:
+        # Use the 2nd edge as the starting edge.
+        edges = edges[1:] + [edges[0]]
+
+    ordered_edges = [edges[0]]  # Start with the first edge
+    remaining_edges = list(edges[1:])
+
+    while remaining_edges:
+        next_edge = find_next_edge(remaining_edges, ordered_edges[-1])
+        if next_edge:
+            ordered_edges.append(next_edge)
+            # Remove the edge from remaining_edges, considering potential tuple format
+            remaining_edges.remove(
+                next_edge if next_edge in remaining_edges else (tuple(next_edge[1]), tuple(next_edge[0]))
+            )
+        else:
+            break  # No more connectable edges, stop here
+
+    return ordered_edges
+
+
+def extract_ordered_vertices(ordered_edges):
+    """
+    Extract the ordered vertices from the list of ordered edges.
+    """
+    ordered_vertices = [ordered_edges[0][0]]
+    for edge in ordered_edges:
+        ordered_vertices.append(edge[1])
+    # The last vertex of the last edge is the same as the first vertex of the first
+    # edge, so remove the last vertex to avoid duplication.
+    ordered_vertices.pop()
+    return ordered_vertices
+
+
+def compute_union_dimensions(boxes):
+    min_x, min_y = float("inf"), float("inf")
+    max_x, max_y = float("-inf"), float("-inf")
+
+    for box in boxes:
+        # Extract the position from the transformation matrix
+        x_center, y_center, _ = box["transform"][:3, 3]
+
+        # Half-sizes for x and y dimensions
+        half_size_x, half_size_y = box["size"][0] / 2, box["size"][1] / 2
+
+        # Calculate min and max coordinates for this box
+        box_min_x = x_center - half_size_x
+        box_max_x = x_center + half_size_x
+        box_min_y = y_center - half_size_y
+        box_max_y = y_center + half_size_y
+
+        # Update the overall min and max
+        min_x = min(min_x, box_min_x)
+        max_x = max(max_x, box_max_x)
+        min_y = min(min_y, box_min_y)
+        max_y = max(max_y, box_max_y)
+
+    # Compute the width and height of the union of the boxes
+    width = max_x - min_x
+    height = max_y - min_y
+
+    return width, height
+
+
+def compute_collision_free_regions(boxes, faces):
+    # This assumes that the first vertex of the first face is not an intersection vertex
+    # Keeps the ordering of the faces.
+
+    width, height = compute_union_dimensions(boxes)
+    scale = min(width, height) / 1000
+
+    intersection_vertices = compute_intersection_points(boxes)
+
+    assert faces[0][0] not in intersection_vertices
+
+    UL = np.array([-1, 1]) * scale
+    UR = np.array([1, 1]) * scale
+    DR = np.array([1, -1]) * scale
+    DL = np.array([-1, -1]) * scale
+
+    def get_offset(vertex):
+        if is_inside_any_box(boxes, vertex + UL) and not is_inside_any_box(boxes, vertex + DR):
+            return DR * 100
+        if is_inside_any_box(boxes, vertex + UR) and not is_inside_any_box(boxes, vertex + DL):
+            return DL * 100
+        if is_inside_any_box(boxes, vertex + DR) and not is_inside_any_box(boxes, vertex + UL):
+            return UL * 100
+        if is_inside_any_box(boxes, vertex + DL) and not is_inside_any_box(boxes, vertex + UR):
+            return UR * 100
+        raise ValueError("No offset found")
+
+    planes_per_region = []
+    faces_per_region = []
+    current_idx = 0
+    while current_idx < len(faces):
+        region_faces = []
+        face = faces[current_idx]
+        region_faces.append(face)
+        incoming_plane = (face[0] + get_offset(face[0]), face[0])
+        while face[1] in intersection_vertices:
+            face = faces[current_idx + 1]
+            region_faces.append(face)
+            current_idx += 1
+        outgoing_plane = (face[1], face[1] + get_offset(face[1]))
+        planes_per_region.append([incoming_plane, outgoing_plane])
+        faces_per_region.append(region_faces)
+        current_idx += 1
+
+    return planes_per_region, faces_per_region
+
+
+def compute_normal_vecs_from_edges(edges, boxes):
+    """
+    Compute normal vectors for edges that start at the edge midpoint and point inside
+    the box.
+    """
+    width, height = compute_union_dimensions(boxes)
+    scale = min(width, height) / 1000
+
+    normal_vecs = []
+    for edge in edges:
+        start, end = edge
+        diff0 = end[0] - start[0]
+        diff1 = end[1] - start[1]
+        normal = np.array([diff1, -diff0])
+        normal /= np.linalg.norm(normal)
+        normal *= scale * 100  # Scale for visualization
+        scaled_normal = normal * scale  # Scale for collision checking
+
+        mid_point = (start[0] + end[0]) / 2, (start[1] + end[1]) / 2
+
+        # Make sure that normal vector points inside the box
+        if is_inside_any_box(boxes, (mid_point[0] + scaled_normal[0], mid_point[1] + scaled_normal[1])):
+            normal_vec = (
+                (mid_point[0], mid_point[1]),
+                (mid_point[0] + normal[0], mid_point[1] + normal[1]),
+            )
+        else:
+            normal_vec = (
+                (mid_point[0], mid_point[1]),
+                (mid_point[0] - normal[0], mid_point[1] - normal[1]),
+            )
+        normal_vecs.append(normal_vec)
+    return normal_vecs
+
+
+def compute_normalized_normal_vector_points_from_edges(edges, boxes):
+    """
+    Computes a point that defines the normal vector with respect to the world origin.
+    The normal vectors point inside the shape.
+    """
+    normal_vecs = compute_normal_vecs_from_edges(edges, boxes)
+    normal_vec_points = [np.array([np.array(vec[1]) - np.array(vec[0])]).reshape((-1, 1)) for vec in normal_vecs]
+    normalized_normal_vec_points = [vec / np.linalg.norm(vec) for vec in normal_vec_points]
+    return normalized_normal_vec_points
+
+
+def compute_com_from_uniform_density(boxes):
+    # Initialize variables to accumulate weighted centroids and total area
+    sum_weighted_x = 0
+    sum_weighted_y = 0
+    total_area = 0
+
+    # Iterate through each box
+    for box in boxes:
+        # Extract size and transformation
+        size = box["size"]
+        transform = box["transform"]
+
+        # Calculate area (ignoring z-dimension)
+        width, height = size[0], size[1]
+        area = width * height
+
+        # Calculate the centroid of the box
+        x_centroid = transform[0, 3]
+        y_centroid = transform[1, 3]
+
+        # Accumulate weighted centroids and total area
+        sum_weighted_x += x_centroid * area
+        sum_weighted_y += y_centroid * area
+        total_area += area
+
+    # Calculate the center of mass
+    center_of_mass_x = sum_weighted_x / total_area
+    center_of_mass_y = sum_weighted_y / total_area
+
+    return center_of_mass_x, center_of_mass_y
+
+
+def offset_boxes(boxes, offset):
+    for box in boxes:
+        box["transform"][0, 3] += offset[0]
+        box["transform"][1, 3] += offset[1]
+    return boxes
+
+
+@dataclass
+class ArbitraryShape2D(CollisionGeometry):
+    def __init__(self, arbitrary_shape_pickle_path: str, com: Optional[np.ndarray] = None):
+        """NOTE: com computed using uniform density if None."""
+        assert arbitrary_shape_pickle_path is not None and arbitrary_shape_pickle_path != ""
+        self.arbitrary_shape_pickle_path = arbitrary_shape_pickle_path
+        self.com = com
+
+    # TODO: This needs to match the sdf file for simulation to work...
+    @property
+    def collision_geometry_names(self) -> List[str]:
+        return [
+            "arbitrary_shape::arbitrary_shape_bottom_collision",
+            "arbitrary_shape::arbitrary_shape_top_collision",
+        ]
+
+    @classmethod
+    def from_drake(cls, drake_shape: DrakeShape):
+        raise NotImplementedError()
+
+    @cached_property
+    def com_offset(self) -> npt.NDArray[np.float64]:
+        boxes = load_primitive_info(self.arbitrary_shape_pickle_path)
+        primitive_types = [box["name"] for box in boxes]
+        assert np.all([t == "box" for t in primitive_types]), f"Only boxes are supported. Got: {primitive_types}"
+        if self.com is not None:
+            return np.array([self.com[0], self.com[1]]).reshape((2, 1))
+        # Compute the center of mass from uniform density
+        logging.info("COM not provided. Computing from uniform density.")
+        x_com, y_com = compute_com_from_uniform_density(boxes)
+        return np.array([x_com, y_com]).reshape((2, 1))
+
+    @cached_property
+    def primitive_boxes(self) -> List[Dict[str, Any]]:
+        """
+        The primitive boxes whose union represents the shape. The resulting shape is
+        assumed to be planar on the xy-plane.
+        NOTE: All boxes require a small overlap.
+        """
+        boxes = load_primitive_info(self.arbitrary_shape_pickle_path)
+        primitive_types = [box["name"] for box in boxes]
+        assert np.all([t == "box" for t in primitive_types]), f"Only boxes are supported. Got: {primitive_types}"
+
+        print(f"COM offset: {self.com_offset.flatten()}")
+        x_com, y_com = self.com_offset.flatten()
+        boxes = offset_boxes(boxes, [-x_com, -y_com])
+
+        return boxes
+
+    @property
+    def max_contact_radius(self) -> float:
+        return np.max([np.linalg.norm(v) for v in self.vertices])
+
+    @cached_property
+    def ordered_edges(
+        self,
+    ) -> List[Tuple[npt.NDArray[np.float64], npt.NDArray[np.float64]]]:
+        vertices = compute_outer_vertices(self.primitive_boxes)
+        edges = compute_outer_edges(vertices, self.primitive_boxes)
+        directed_edges = direct_edges_so_right_points_inside(edges, self.primitive_boxes)
+        ordered_edges = order_edges_by_connectivity(directed_edges, self.primitive_boxes)
+
+        return ordered_edges
+
+    @cached_property
+    def vertices(self) -> List[npt.NDArray[np.float64]]:
+        ordered_vertices = extract_ordered_vertices(self.ordered_edges)
+        vertices_np = [np.array(v).reshape((2, 1)) for v in ordered_vertices]
+        return vertices_np
+
+    @property
+    def num_vertices(self) -> int:
+        return len(self.vertices)
+
+    @cached_property
+    def faces(self) -> List[Hyperplane]:
+        edges_np = [np.array(edge) for edge in self.ordered_edges]
+        hyperplanes = [construct_2d_plane_from_points(*edge) for edge in edges_np]
+        return hyperplanes
+
+    @cached_property
+    def width(self) -> float:
+        width, _ = compute_union_dimensions(self.primitive_boxes)
+        return width
+
+    @cached_property
+    def height(self) -> float:
+        _, height = compute_union_dimensions(self.primitive_boxes)
+        return height
+
+    @cached_property
+    def contact_locations(self) -> List[PolytopeContactLocation]:
+        locs = [PolytopeContactLocation(pos=ContactLocation.FACE, idx=idx) for idx in range(len(self.faces))]
+        return locs
+
+    @cached_property
+    def num_collision_free_regions(self) -> int:
+        planes_per_region, _ = compute_collision_free_regions(self.primitive_boxes, self.ordered_edges)
+        return len(planes_per_region)
+
+    @cached_property
+    def planes_and_faces_per_region(
+        self,
+    ) -> Tuple[
+        List[List[Tuple[np.ndarray, np.ndarray]]],
+        List[List[Tuple[np.ndarray, np.ndarray]]],
+    ]:
+        planes_per_region, faces_per_region = compute_collision_free_regions(self.primitive_boxes, self.ordered_edges)
+        planes_per_region_np = [[np.array(p) for p in planes] for planes in planes_per_region]
+        faces_per_region_np = [[np.array(f) for f in faces] for faces in faces_per_region]
+        return planes_per_region_np, faces_per_region_np
+
+    @cached_property
+    def face_to_region_mapping(self) -> List[int]:
+        _, faces_per_region = self.planes_and_faces_per_region
+        face_to_region_mapping = []
+        for region_idx, faces in enumerate(faces_per_region):
+            for _ in faces:
+                face_to_region_mapping.append(region_idx)
+        return face_to_region_mapping
+
+    def get_collision_free_region_for_loc_idx(self, loc_idx: int) -> int:
+        face_to_region_mapping = self.face_to_region_mapping
+        return face_to_region_mapping[loc_idx]
+
+    def get_contact_planes(self, idx: int) -> List[Hyperplane]:
+        """
+        Gets the contact faces for each collision-free set.
+        This function is hand designed for the object geometry.
+        """
+        _, faces_per_region = self.planes_and_faces_per_region
+        faces = faces_per_region[idx]
+        return [construct_2d_plane_from_points(*face) for face in faces]
+
+    def get_planes_for_collision_free_region(self, idx: int) -> List[Hyperplane]:
+        """
+        Gets the faces that defines the collision free sets (except for the contact face)
+        This function is hand designed for the object geometry.
+        """
+        planes_per_region, _ = self.planes_and_faces_per_region
+        planes = planes_per_region[idx]
+        return [construct_2d_plane_from_points(*plane) for plane in planes]
+
+    # TODO: All of the following code is copied straight from equilateralpolytope and should be unified!
+
+    @property
+    def vertices_for_plotting(self) -> npt.NDArray[np.float64]:
+        vertices = np.hstack([self.vertices[idx] for idx in range(self.num_vertices)])
+        return vertices
+
+    def get_proximate_vertices_from_location(self, location: PolytopeContactLocation) -> List[npt.NDArray[np.float64]]:
+        if location.pos == ContactLocation.FACE:
+            wrap_around = lambda num: num % self.num_vertices
+            return [
+                self.vertices[location.idx],
+                self.vertices[wrap_around(location.idx + 1)],
+            ]
+        elif location.pos == ContactLocation.VERTEX:
+            return [self.vertices[location.idx]]
+        else:
+            raise NotImplementedError(f"Location {location.pos}: {location.idx} not implemented")
+
+    def get_neighbouring_vertices(
+        self, location: PolytopeContactLocation
+    ) -> Tuple[npt.NDArray[np.float64], npt.NDArray[np.float64]]:
+        if location.pos == ContactLocation.VERTEX:
+            wrap_around = lambda num: num % self.num_vertices
+            idx_prev = wrap_around(location.idx - 1)
+            idx_next = wrap_around(location.idx + 1)
+
+            return self.vertices[idx_prev], self.vertices[idx_next]
+        else:
+            raise NotImplementedError(f"Location {location.pos}: {location.idx} not implemented")
+
+    def get_hyperplane_from_location(self, location: PolytopeContactLocation) -> Hyperplane:
+        if location.pos == ContactLocation.FACE:
+            return self.faces[location.idx]
+        else:
+            raise NotImplementedError(f"Cannot get hyperplane from location {location.pos}: {location.idx}")
+
+    @cached_property
+    def normal_vecs(self) -> List[npt.NDArray[np.float64]]:
+        normals = compute_normalized_normal_vector_points_from_edges(self.ordered_edges, self.primitive_boxes)
+        return normals
+
+    @staticmethod
+    def _get_tangent_vec(v: npt.NDArray[np.float64]):
+        """
+        Returns the 2d tangent vector calculated as the cross product with the z-axis
+        pointing out of the plane.
+        """
+        return np.array([-v[1], v[0]]).reshape((-1, 1))
+
+    @cached_property
+    def tangent_vecs(self) -> List[npt.NDArray[np.float64]]:
+        tangents = [self._get_tangent_vec(self.normal_vecs[idx]) for idx in range(self.num_vertices)]
+        return tangents
+
+    @cached_property
+    def corner_normal_vecs(self) -> List[npt.NDArray[np.float64]]:
+        wrap_around = lambda idx: idx % self.num_vertices
+        indices = [(wrap_around(idx - 1), idx) for idx in range(self.num_vertices)]
+        corner_normals = [normalize_vec(self.normal_vecs[i] + self.normal_vecs[j]) for i, j in indices]
+        return corner_normals
+
+    @cached_property
+    def corner_tangent_vecs(self) -> List[npt.NDArray[np.float64]]:
+        tangents = [self._get_tangent_vec(self.corner_normal_vecs[idx]) for idx in range(self.num_vertices)]
+        return tangents
+
+    def get_norm_and_tang_vecs_from_location(
+        self, location: PolytopeContactLocation
+    ) -> Tuple[npt.NDArray[np.float64], npt.NDArray[np.float64]]:
+        if location.pos == ContactLocation.FACE:
+            return self.normal_vecs[location.idx], self.tangent_vecs[location.idx]
+        elif location.pos == ContactLocation.VERTEX:
+            return (
+                self.corner_normal_vecs[location.idx],
+                self.corner_tangent_vecs[location.idx],
+            )
+        else:
+            raise ValueError(f"Cannot get normal and tangent vecs from location {location.pos}")
+
+    def get_face_length(self, location: PolytopeContactLocation) -> float:
+        raise NotImplementedError("Face length not yet implemented for the TPusher.")
+
+    def get_as_boxes(self, z_value: float = 0.0) -> Tuple[List[Box2d], List[RigidTransform]]:
+        boxes_2d = []
+        transforms = []
+        for box in self.primitive_boxes:
+            size = box["size"]
+            transform = box["transform"].copy()
+            transform[2, 3] = z_value
+            boxes_2d.append(Box2d(size[0], size[1]))
+            transforms.append(RigidTransform(transform))
+        return boxes_2d, transforms
+
+
+def main() -> None:
+    import sys
+
+    import matplotlib.patches as mpatches
+    import matplotlib.pyplot as plt
+    import pydrake.geometry.optimization as opt
+
+    from gcs_planar_pushing.geometry.collision_geometry.collision_geometry import (
+        ContactLocation,
+        PolytopeContactLocation,
+    )
+    from gcs_planar_pushing.geometry.planar.non_collision import NonCollisionMode
+    from gcs_planar_pushing.geometry.rigid_body import RigidBody
+    from gcs_planar_pushing.planning.planar.planar_plan_config import (
+        PlanarPlanConfig,
+        SliderPusherSystemConfig,
+    )
+
+    pickle_path = sys.argv[1] if len(sys.argv) > 1 else "arbitrary_shape_pickles/small_t_pusher.pkl"
+    shape = ArbitraryShape2D(pickle_path)
+
+    # Build the same config and mode objects used by PlanarPushingMPC / NonCollisionSubGraph
+    config = PlanarPlanConfig(
+        dynamics_config=SliderPusherSystemConfig(slider=RigidBody(name="slider", geometry=shape, mass=0.1))
+    )
+    modes = [
+        NonCollisionMode.create_from_plan_spec(PolytopeContactLocation(ContactLocation.FACE, idx), config)
+        for idx in range(shape.num_collision_free_regions)
+    ]
+
+    # Bounding box for clipping the (unbounded) regions to the plot extent
+    all_verts = np.hstack(shape.vertices)
+    margin = 0.05
+    lb = np.array([float(all_verts[0].min()) - margin, float(all_verts[1].min()) - margin])
+    ub = np.array([float(all_verts[0].max()) + margin, float(all_verts[1].max()) + margin])
+    bbox = opt.HPolyhedron.MakeBox(lb, ub)
+
+    colors = [plt.cm.tab10(i / 10.0) for i in range(len(modes))]
+    fig, ax = plt.subplots(figsize=(7, 9))
+
+    for r, mode in enumerate(modes):
+        # Translate the mode's stored planes into Drake's HPolyhedron (Ax <= b):
+        #   region planes:  a^T p >= b       →  -a^T p <=  -b
+        #   contact planes: a^T p >= b + r   →  -a^T p <= -(b + r)
+        r_pusher = mode.dynamics_config.pusher_radius
+        planes = [(p, 0.0) for p in mode.collision_free_space_planes] + [(p, r_pusher) for p in mode.contact_planes]
+        A = np.vstack([-p.a.T for p, _ in planes])
+        b_vec = np.array([-(p.b.item() + offset) for p, offset in planes])
+
+        # Clip to the bounding box and extract CCW-sorted polygon vertices
+        vertices = opt.VPolytope(opt.HPolyhedron(A, b_vec).Intersection(bbox)).vertices()  # (2, n)
+        centroid = vertices.mean(axis=1)
+        order = np.argsort(np.arctan2(vertices[1] - centroid[1], vertices[0] - centroid[0]))
+        v = vertices[:, order]
+
+        ax.fill(v[0], v[1], color=colors[r][:3], alpha=0.4, zorder=1)
+        ax.text(
+            centroid[0],
+            centroid[1],
+            str(r),
+            ha="center",
+            va="center",
+            fontsize=13,
+            fontweight="bold",
+            color=colors[r],
+            zorder=5,
+            bbox=dict(facecolor="white", alpha=0.65, boxstyle="round,pad=0.2"),
+        )
+
+    # Draw the shape
+    verts = np.hstack(shape.vertices)
+    verts_closed = np.hstack([verts, verts[:, :1]])
+    ax.fill(verts_closed[0], verts_closed[1], color="lightgray", zorder=2)
+    ax.plot(verts_closed[0], verts_closed[1], "k-", linewidth=2, zorder=3)
+
+    ax.legend(
+        handles=[mpatches.Patch(facecolor=colors[r], alpha=0.5, label=f"Region {r}") for r in range(len(modes))],
+        loc="upper right",
+        fontsize=9,
+    )
+    ax.set_xlim(lb[0], ub[0])
+    ax.set_ylim(lb[1], ub[1])
+    ax.set_aspect("equal")
+    ax.set_title(f"Collision-Free Mode Regions\n{pickle_path}")
+    ax.set_xlabel("x (body frame, m)")
+    ax.set_ylabel("y (body frame, m)")
+    ax.grid(True, alpha=0.3, zorder=0)
+
+    plt.tight_layout()
+    output_path = pickle_path.replace(".pkl", "_regions.png")
+    plt.savefig(output_path, dpi=150, bbox_inches="tight")
+    print(f"Saved plot to {output_path}")
+    plt.show()
+
+
+if __name__ == "__main__":
+    main()

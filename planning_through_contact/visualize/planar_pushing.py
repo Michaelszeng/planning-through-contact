@@ -7,9 +7,8 @@ import numpy as np
 import numpy.typing as npt
 from pydrake.common.value import Value
 from pydrake.geometry import Box as DrakeBox
-from pydrake.geometry import Convex
-from pydrake.geometry import Cylinder as DrakeCylinder
 from pydrake.geometry import (
+    Convex,
     FrameId,
     FramePoseVector,
     GeometryFrame,
@@ -17,6 +16,7 @@ from pydrake.geometry import (
     MakePhongIllustrationProperties,
     SceneGraph,
 )
+from pydrake.geometry import Cylinder as DrakeCylinder
 from pydrake.geometry import Sphere as DrakeSphere
 from pydrake.math import RigidTransform, RotationMatrix
 from pydrake.systems.all import Context, DiagramBuilder, LeafSystem
@@ -26,6 +26,9 @@ from pydrake.systems.planar_scenegraph_visualizer import (
     PlanarSceneGraphVisualizer,
 )
 
+from planning_through_contact.geometry.collision_geometry.arbitrary_shape_2d import (
+    ArbitraryShape2D,
+)
 from planning_through_contact.geometry.collision_geometry.box_2d import Box2d
 from planning_through_contact.geometry.collision_geometry.collision_geometry import (
     CollisionGeometry,
@@ -77,9 +80,7 @@ def compare_trajs_vertically(
 ) -> None:
     # We need to add the first vertex again to close the polytope
     traj = trajs[0]
-    vertices = np.hstack(
-        traj.config.slider_geometry.vertices + [traj.config.slider_geometry.vertices[0]]
-    )
+    vertices = np.hstack(traj.config.slider_geometry.vertices + [traj.config.slider_geometry.vertices[0]])
 
     get_vertices_W = lambda p_WB, R_WB: p_WB + R_WB.dot(vertices)
 
@@ -94,13 +95,7 @@ def compare_trajs_vertically(
 
     def _get_seg_groups(
         traj,
-    ) -> List[
-        List[
-            Tuple[
-                FaceContactTrajSegment | NonCollisionTrajSegment, FaceContactVariables
-            ]
-        ]
-    ]:
+    ) -> List[List[Tuple[FaceContactTrajSegment | NonCollisionTrajSegment, FaceContactVariables]]]:
         segment_groups = []
         idx = 0
         while idx < len(traj.path_knot_points):
@@ -128,9 +123,7 @@ def compare_trajs_vertically(
     max_length = max(len(group) for group in seg_groups)
 
     fig_height = 5
-    fig, axs = plt.subplots(
-        len(trajs), max_length, figsize=(fig_height * max_length, fig_height)
-    )
+    fig, axs = plt.subplots(len(trajs), max_length, figsize=(fig_height * max_length, fig_height))
 
     if plot_lims is not None:
         x_min, x_max, y_min, y_max = plot_lims
@@ -150,18 +143,13 @@ def compare_trajs_vertically(
         for segment_idx, segment_group in enumerate(groups):
             ax = axs[row_idx, segment_idx]
 
-            num_frames_in_group = sum(
-                [knot_points.num_knot_points for _, knot_points in segment_group]
-            )
+            num_frames_in_group = sum([knot_points.num_knot_points for _, knot_points in segment_group])
             frame_count = 0
 
             start_transparency = 0.5
             end_transparency = 0.9
-            get_transp_for_frame = (
-                lambda idx, num_points: (end_transparency - start_transparency)
-                * idx
-                / num_points
-                + start_transparency
+            get_transp_for_frame = lambda idx, num_points: (
+                (end_transparency - start_transparency) * idx / num_points + start_transparency
             )
 
             for element_idx, (traj_segment, knot_points) in enumerate(segment_group):
@@ -179,9 +167,7 @@ def compare_trajs_vertically(
                     # We only plot the current frame if it will change next frame
                     # (this is to avoid plotting multiple frames on top of each other)
                     if idx + 1 < knot_points.num_knot_points:
-                        next_R_WB = traj_segment.get_R_WB(ts[idx + 1])[
-                            :2, :2
-                        ]  # 2x2 matrix
+                        next_R_WB = traj_segment.get_R_WB(ts[idx + 1])[:2, :2]  # 2x2 matrix
                         next_p_WB = traj_segment.get_p_WB(ts[idx + 1])
                         next_p_WP = traj_segment.get_p_WP(ts[idx + 1])
                     else:
@@ -191,17 +177,11 @@ def compare_trajs_vertically(
 
                     vertices_W = get_vertices_W(p_WB, R_WB)
 
-                    transparency = get_transp_for_frame(
-                        frame_count, num_frames_in_group
-                    )
+                    transparency = get_transp_for_frame(frame_count, num_frames_in_group)
                     line_transparency = transparency
 
                     # Plot polytope
-                    if (
-                        np.any(next_R_WB != R_WB)
-                        or np.any(next_p_WB != p_WB)
-                        or element_idx == len(segment_group) - 1
-                    ):
+                    if np.any(next_R_WB != R_WB) or np.any(next_p_WB != p_WB) or element_idx == len(segment_group) - 1:
                         ax.plot(
                             vertices_W[0, :],
                             vertices_W[1, :],
@@ -219,9 +199,7 @@ def compare_trajs_vertically(
                     FORCE_SCALE = 2.0
                     FORCE_VIS_TRESH = 1e-4
                     # only N-1 inputs
-                    if (idx < knot_points.num_knot_points - 1) and (
-                        isinstance(knot_points, FaceContactVariables)
-                    ):
+                    if (idx < knot_points.num_knot_points - 1) and (isinstance(knot_points, FaceContactVariables)):
                         f_W = traj_segment.get_f_W(ts[idx]).flatten()
                         if np.linalg.norm(f_W) < FORCE_VIS_TRESH:
                             continue
@@ -247,22 +225,17 @@ def compare_trajs_vertically(
         _plot_segment_groups(idx, group, color, color)
 
     if not plot_knot_points:
-        raise NotImplementedError(
-            "Support for making figure of interpolated trajectory is not yet supported"
-        )
+        raise NotImplementedError("Support for making figure of interpolated trajectory is not yet supported")
 
     # Create a list of patches to use as legend handles
     if legends is not None:
-        custom_patches = [
-            mpatches.Patch(color=color, label=label)
-            for label, color in zip(legends, colors)
-        ]
+        custom_patches = [mpatches.Patch(color=color, label=label) for label, color in zip(legends, colors)]
         # Creating the custom legend
         plt.legend(handles=custom_patches)
 
     fig.tight_layout()
     if filename is not None:
-        fig.savefig(filename + f".pdf")  # type: ignore
+        fig.savefig(filename + ".pdf")  # type: ignore
     else:
         plt.show()
 
@@ -277,10 +250,7 @@ def compare_trajs(
     traj_b_legend: str = "traj_b",
 ) -> None:
     # We need to add the first vertex again to close the polytope
-    vertices = np.hstack(
-        traj_a.config.slider_geometry.vertices
-        + [traj_a.config.slider_geometry.vertices[0]]
-    )
+    vertices = np.hstack(traj_a.config.slider_geometry.vertices + [traj_a.config.slider_geometry.vertices[0]])
 
     get_vertices_W = lambda p_WB, R_WB: p_WB + R_WB.dot(vertices)
 
@@ -360,18 +330,13 @@ def compare_trajs(
             # Hide the axes, including the spines, ticks, labels, and title
             ax.set_axis_off()
 
-            num_frames_in_group = sum(
-                [knot_points.num_knot_points for _, knot_points in segment_group]
-            )
+            num_frames_in_group = sum([knot_points.num_knot_points for _, knot_points in segment_group])
             frame_count = 0
 
             start_transparency = 0.5
             end_transparency = 0.9
-            get_transp_for_frame = (
-                lambda idx, num_points: (end_transparency - start_transparency)
-                * idx
-                / num_points
-                + start_transparency
+            get_transp_for_frame = lambda idx, num_points: (
+                (end_transparency - start_transparency) * idx / num_points + start_transparency
             )
 
             for element_idx, (traj_segment, knot_points) in enumerate(segment_group):
@@ -389,9 +354,7 @@ def compare_trajs(
                     # We only plot the current frame if it will change next frame
                     # (this is to avoid plotting multiple frames on top of each other)
                     if idx + 1 < knot_points.num_knot_points:
-                        next_R_WB = traj_segment.get_R_WB(ts[idx + 1])[
-                            :2, :2
-                        ]  # 2x2 matrix
+                        next_R_WB = traj_segment.get_R_WB(ts[idx + 1])[:2, :2]  # 2x2 matrix
                         next_p_WB = traj_segment.get_p_WB(ts[idx + 1])
                         next_p_WP = traj_segment.get_p_WP(ts[idx + 1])
                     else:
@@ -401,17 +364,11 @@ def compare_trajs(
 
                     vertices_W = get_vertices_W(p_WB, R_WB)
 
-                    transparency = get_transp_for_frame(
-                        frame_count, num_frames_in_group
-                    )
+                    transparency = get_transp_for_frame(frame_count, num_frames_in_group)
                     line_transparency = transparency
 
                     # Plot polytope
-                    if (
-                        np.any(next_R_WB != R_WB)
-                        or np.any(next_p_WB != p_WB)
-                        or element_idx == len(segment_group) - 1
-                    ):
+                    if np.any(next_R_WB != R_WB) or np.any(next_p_WB != p_WB) or element_idx == len(segment_group) - 1:
                         ax.plot(
                             vertices_W[0, :],
                             vertices_W[1, :],
@@ -429,9 +386,7 @@ def compare_trajs(
                     FORCE_SCALE = 2.0
                     FORCE_VIS_TRESH = 1e-4
                     # only N-1 inputs
-                    if (idx < knot_points.num_knot_points - 1) and (
-                        isinstance(knot_points, FaceContactVariables)
-                    ):
+                    if (idx < knot_points.num_knot_points - 1) and (isinstance(knot_points, FaceContactVariables)):
                         f_W = traj_segment.get_f_W(ts[idx]).flatten()
                         if np.linalg.norm(f_W) < FORCE_VIS_TRESH:
                             continue
@@ -457,9 +412,7 @@ def compare_trajs(
     _plot_segment_groups(traj_b_segment_groups, TRAJ_B_COLOR, TRAJ_B_COLOR_DARK)
 
     if not plot_knot_points:
-        raise NotImplementedError(
-            "Support for making figure of interpolated trajectory is not yet supported"
-        )
+        raise NotImplementedError("Support for making figure of interpolated trajectory is not yet supported")
 
         # # Plot start pos
         # slider_initial_pose = traj_a.config.start_and_goal.slider_initial_pose  # type: ignore
@@ -516,16 +469,14 @@ def compare_trajs(
     # Create a list of patches to use as legend handles
     custom_patches = [
         mpatches.Patch(color=color, label=label)
-        for label, color in zip(
-            [traj_a_legend, traj_b_legend], [TRAJ_A_COLOR, TRAJ_B_COLOR]
-        )
+        for label, color in zip([traj_a_legend, traj_b_legend], [TRAJ_A_COLOR, TRAJ_B_COLOR])
     ]
     # Creating the custom legend
     plt.legend(handles=custom_patches)
 
     fig.tight_layout()
     if filename is not None:
-        fig.savefig(filename + f".pdf")  # type: ignore
+        fig.savefig(filename + ".pdf")  # type: ignore
         plt.close()
 
 
@@ -534,17 +485,11 @@ def plot_forces(
     filename: str,
 ) -> None:
     face_knot_points = [
-        knot_points
-        for knot_points in traj.path_knot_points
-        if isinstance(knot_points, FaceContactVariables)
+        knot_points for knot_points in traj.path_knot_points if isinstance(knot_points, FaceContactVariables)
     ]
 
-    normal_forces = np.concatenate(
-        [knot_point.normal_forces for knot_point in face_knot_points]
-    )
-    friction_forces = np.concatenate(
-        [knot_point.friction_forces for knot_point in face_knot_points]
-    )
+    normal_forces = np.concatenate([knot_point.normal_forces for knot_point in face_knot_points])
+    friction_forces = np.concatenate([knot_point.friction_forces for knot_point in face_knot_points])
 
     fig, axs = plt.subplots(2)
     # First plot
@@ -584,9 +529,7 @@ def plot_simple_traj(
     plt.rcParams["text.usetex"] = False
     # NOTE(bernhardpg): This function is a mess!
     # We need to add the first vertex again to close the polytope
-    vertices = np.hstack(
-        traj.config.slider_geometry.vertices + [traj.config.slider_geometry.vertices[0]]
-    )
+    vertices = np.hstack(traj.config.slider_geometry.vertices + [traj.config.slider_geometry.vertices[0]])
 
     get_vertices_W = lambda p_WB, R_WB: p_WB + R_WB.dot(vertices)
 
@@ -610,18 +553,14 @@ def plot_simple_traj(
     assert keyframe_times is not None
 
     fig_height = 4
-    fig, axs = plt.subplots(
-        1, num_keyframes, figsize=(fig_height * num_keyframes, fig_height)
-    )
+    fig, axs = plt.subplots(1, num_keyframes, figsize=(fig_height * num_keyframes, fig_height))
 
     if plot_lims is not None:
         x_min, x_max, y_min, y_max = plot_lims
     else:
         x_min, x_max, y_min, y_max = traj.get_pos_limits(buffer=0.12)
 
-    for keyframe_idx, (keyframe_t_curr, keyframe_t_next) in enumerate(
-        zip(keyframe_times[:-1], keyframe_times[1:])
-    ):
+    for keyframe_idx, (keyframe_t_curr, keyframe_t_next) in enumerate(zip(keyframe_times[:-1], keyframe_times[1:])):
         if times_for_keyframes is not None:
             num_times_per_keyframe = times_for_keyframes[keyframe_idx]
 
@@ -650,11 +589,8 @@ def plot_simple_traj(
 
         start_transparency = 0.3
         end_transparency = 1.0
-        get_transp_for_frame = (
-            lambda idx, num_points: (end_transparency - start_transparency)
-            * idx
-            / num_points
-            + start_transparency
+        get_transp_for_frame = lambda idx, num_points: (
+            (end_transparency - start_transparency) * idx / num_points + start_transparency
         )
 
         for t in times:
@@ -748,9 +684,7 @@ def plot_simple_traj(
                 for label, color in zip(["Start", "Goal"], [START_COLOR, GOAL_COLOR])
             ]
             # Creating the custom legend
-            plt.legend(
-                handles=custom_patches, handlelength=2.5, fontsize=22, loc="upper right"
-            )
+            plt.legend(handles=custom_patches, handlelength=2.5, fontsize=22, loc="upper right")
 
         if label:
             # Create a list of patches to use as legend handles
@@ -760,7 +694,7 @@ def plot_simple_traj(
 
     fig.tight_layout()
     if filename:
-        fig.savefig(filename + f"_trajectory.pdf", format="pdf")  # type: ignore
+        fig.savefig(filename + "_trajectory.pdf", format="pdf")  # type: ignore
         plt.close()
     else:
         plt.show()
@@ -786,9 +720,7 @@ def make_traj_figure(
     plt.rcParams["text.usetex"] = False
     # NOTE(bernhardpg): This function is a mess!
     # We need to add the first vertex again to close the polytope
-    vertices = np.hstack(
-        traj.config.slider_geometry.vertices + [traj.config.slider_geometry.vertices[0]]
-    )
+    vertices = np.hstack(traj.config.slider_geometry.vertices + [traj.config.slider_geometry.vertices[0]])
 
     get_vertices_W = lambda p_WB, R_WB: p_WB + R_WB.dot(vertices)
 
@@ -842,9 +774,7 @@ def make_traj_figure(
             segment_groups.append(group)
 
     fig_height = 4
-    fig, axs = plt.subplots(
-        1, len(segment_groups), figsize=(fig_height * len(segment_groups), fig_height)
-    )
+    fig, axs = plt.subplots(1, len(segment_groups), figsize=(fig_height * len(segment_groups), fig_height))
 
     if plot_lims is not None:
         x_min, x_max, y_min, y_max = plot_lims
@@ -864,9 +794,7 @@ def make_traj_figure(
         # Hide the axes, including the spines, ticks, labels, and title
         ax.set_axis_off()
 
-        num_frames_in_group = sum(
-            [knot_points.num_knot_points for _, knot_points in segment_group]
-        )
+        num_frames_in_group = sum([knot_points.num_knot_points for _, knot_points in segment_group])
         frame_count = 0
 
         make_circle = lambda p_WP, fill_transparency: plt.Circle(
@@ -880,11 +808,8 @@ def make_traj_figure(
 
         start_transparency = 0.3
         end_transparency = 1.0
-        get_transp_for_frame = (
-            lambda idx, num_points: (end_transparency - start_transparency)
-            * idx
-            / num_points
-            + start_transparency
+        get_transp_for_frame = lambda idx, num_points: (
+            (end_transparency - start_transparency) * idx / num_points + start_transparency
         )
 
         if show_workspace:
@@ -904,13 +829,7 @@ def make_traj_figure(
         frame_count = 0
         for element_idx, (traj_segment, knot_points) in enumerate(segment_group):
             # we don't plot the first mode (source)
-            num_segments_to_plot = len(
-                [
-                    1
-                    for _, knot_points in segment_group
-                    if knot_points.num_knot_points > 1
-                ]
-            )
+            num_segments_to_plot = len([1 for _, knot_points in segment_group if knot_points.num_knot_points > 1])
 
             if not plot_knot_points:
                 if knot_points.num_knot_points == 1 and element_idx == 0:
@@ -922,22 +841,15 @@ def make_traj_figure(
                     num_frames_in_segment = num_non_collision_frames
 
                     if segment_idx < len(segment_groups) - 1:
-                        num_frames_in_group = (
-                            num_frames_in_segment * num_segments_to_plot
-                        )
+                        num_frames_in_group = num_frames_in_segment * num_segments_to_plot
                     else:  # last group, we plot last mode
-                        num_frames_in_group = (
-                            num_frames_in_segment * (len(segment_group) - 1) + 1
-                        )
+                        num_frames_in_group = num_frames_in_segment * (len(segment_group) - 1) + 1
                 else:  # face contact
                     num_frames_in_segment = num_contact_frames
                     # Only one face contact
                     num_frames_in_group = num_frames_in_segment
 
-                if (
-                    segment_idx == len(segment_groups) - 1
-                    and element_idx == len(segment_group) - 1
-                ):
+                if segment_idx == len(segment_groups) - 1 and element_idx == len(segment_group) - 1:
                     ts = [traj_segment.start_time]
                 else:
                     ts = np.linspace(
@@ -946,15 +858,11 @@ def make_traj_figure(
                         num_frames_in_segment,
                     )
                 if element_idx < len(segment_group) - 1:
-                    ts = ts[
-                        :-1
-                    ]  # avoid plotting the last pusher of intermittent modes so we don't get double plots
+                    ts = ts[:-1]  # avoid plotting the last pusher of intermittent modes so we don't get double plots
 
                 for idx, t in enumerate(ts):
                     p_WP = traj_segment.get_p_WP(t)
-                    transparency = get_transp_for_frame(
-                        frame_count, num_frames_in_group
-                    )
+                    transparency = get_transp_for_frame(frame_count, num_frames_in_group)
                     if transparency > 1:
                         breakpoint()
                     ax.add_patch(make_circle(p_WP, transparency))
@@ -983,9 +891,7 @@ def make_traj_figure(
                         # Plot forces
                         FORCE_SCALE = 8.0
                         # only N-1 inputs
-                        if (idx < knot_points.num_knot_points - 1) and (
-                            isinstance(knot_points, FaceContactVariables)
-                        ):
+                        if (idx < knot_points.num_knot_points - 1) and (isinstance(knot_points, FaceContactVariables)):
                             f_W = traj_segment.get_f_W(ts[idx]).flatten() * FORCE_SCALE
                             p_Wc = traj_segment.get_p_Wc(ts[idx]).flatten()
                             ax.arrow(
@@ -1026,9 +932,7 @@ def make_traj_figure(
                     # We only plot the current frame if it will change next frame
                     # (this is to avoid plotting multiple frames on top of each other)
                     if idx + 1 < knot_points.num_knot_points:
-                        next_R_WB = traj_segment.get_R_WB(ts[idx + 1])[
-                            :2, :2
-                        ]  # 2x2 matrix
+                        next_R_WB = traj_segment.get_R_WB(ts[idx + 1])[:2, :2]  # 2x2 matrix
                         next_p_WB = traj_segment.get_p_WB(ts[idx + 1])
                         next_p_WP = traj_segment.get_p_WP(ts[idx + 1])
                     else:
@@ -1038,18 +942,12 @@ def make_traj_figure(
 
                     vertices_W = get_vertices_W(p_WB, R_WB)
 
-                    transparency = get_transp_for_frame(
-                        frame_count, num_frames_in_group
-                    )
+                    transparency = get_transp_for_frame(frame_count, num_frames_in_group)
                     line_transparency = transparency
                     fill_transparency = transparency
 
                     # Plot polytope
-                    if (
-                        np.any(next_R_WB != R_WB)
-                        or np.any(next_p_WB != p_WB)
-                        or element_idx == len(segment_group) - 1
-                    ):
+                    if np.any(next_R_WB != R_WB) or np.any(next_p_WB != p_WB) or element_idx == len(segment_group) - 1:
                         ax.plot(
                             vertices_W[0, :],
                             vertices_W[1, :],
@@ -1065,19 +963,14 @@ def make_traj_figure(
                         )
 
                     # Plot pusher
-                    if (
-                        np.any(next_p_WP != p_WP)
-                        or element_idx == len(segment_group) - 1
-                    ):
+                    if np.any(next_p_WP != p_WP) or element_idx == len(segment_group) - 1:
                         ax.add_patch(make_circle(p_WP, fill_transparency))
 
                     if plot_forces:
                         # Plot forces
                         FORCE_SCALE = 0.5
                         # only N-1 inputs
-                        if (idx < knot_points.num_knot_points - 1) and (
-                            isinstance(knot_points, FaceContactVariables)
-                        ):
+                        if (idx < knot_points.num_knot_points - 1) and (isinstance(knot_points, FaceContactVariables)):
                             f_W = traj_segment.get_f_W(ts[idx]).flatten() * FORCE_SCALE
 
                             TOL = 1e-3
@@ -1171,15 +1064,13 @@ def make_traj_figure(
 
     fig.tight_layout()
     if filename:
-        fig.savefig(filename + f"_trajectory.pdf", format="pdf")  # type: ignore
+        fig.savefig(filename + "_trajectory.pdf", format="pdf")  # type: ignore
         plt.close()
     else:
         plt.show()
 
 
-def _create_polygon_mesh(
-    vertices: npt.NDArray[np.float64], filename: str = "polygon.obj"
-) -> None:
+def _create_polygon_mesh(vertices: npt.NDArray[np.float64], filename: str = "polygon.obj") -> None:
     # Ensure vertices are in the correct format (N x 3 for 3D mesh)
     if vertices.shape[1] != 3:
         raise ValueError("Vertices should have 3 columns for x, y, z coordinates.")
@@ -1268,6 +1159,26 @@ def _add_slider_geometries(
                 box_geometry_id,
                 MakePhongIllustrationProperties(color.diffuse(alpha)),
             )
+    elif isinstance(slider_geometry, ArbitraryShape2D):
+        boxes, transforms = slider_geometry.get_as_boxes(DEFAULT_HEIGHT / 2)
+        box_geometry_ids = [
+            scene_graph.RegisterGeometry(
+                source_id,
+                slider_frame_id,
+                GeometryInstance(
+                    transform,
+                    DrakeBox(box.width, box.height, DEFAULT_HEIGHT),
+                    f"box_{idx}",
+                ),
+            )
+            for idx, (box, transform) in enumerate(zip(boxes, transforms))
+        ]
+        for box_geometry_id in box_geometry_ids:
+            scene_graph.AssignRole(
+                source_id,
+                box_geometry_id,
+                MakePhongIllustrationProperties(color.diffuse(alpha)),
+            )
     elif isinstance(slider_geometry, VertexDefinedGeometry):
         mesh = _load_2d_vertices_as_mesh(slider_geometry.vertices)
         geometry_id = scene_graph.RegisterGeometry(
@@ -1281,9 +1192,7 @@ def _add_slider_geometries(
             MakePhongIllustrationProperties(color.diffuse(alpha)),
         )
     else:
-        raise NotImplementedError(
-            f"Cannot add geometry {slider_geometry.__class__.__name__} to builder."
-        )
+        raise NotImplementedError(f"Cannot add geometry {slider_geometry.__class__.__name__} to builder.")
 
     if show_com:
         com_id = scene_graph.RegisterGeometry(
@@ -1291,16 +1200,15 @@ def _add_slider_geometries(
             slider_frame_id,
             GeometryInstance(
                 RigidTransform(
-                    RotationMatrix.Identity(), np.array([0, 0, 0])  # type: ignore
+                    RotationMatrix.Identity(),
+                    np.array([0, 0, 0]),  # type: ignore
                 ),
                 DrakeSphere(0.005),
                 "pusher",
             ),
         )
         com_color = BLACK.diffuse(alpha)
-        scene_graph.AssignRole(
-            source_id, com_id, MakePhongIllustrationProperties(com_color)
-        )
+        scene_graph.AssignRole(source_id, com_id, MakePhongIllustrationProperties(com_color))
 
 
 def _add_pusher_geometry(
@@ -1316,7 +1224,8 @@ def _add_pusher_geometry(
         pusher_frame_id,
         GeometryInstance(
             RigidTransform(
-                RotationMatrix.Identity(), np.array([0, 0, CYLINDER_HEIGHT / 2])  # type: ignore
+                RotationMatrix.Identity(),
+                np.array([0, 0, CYLINDER_HEIGHT / 2]),  # type: ignore
             ),
             DrakeCylinder(pusher_radius, CYLINDER_HEIGHT),
             "pusher",
@@ -1349,12 +1258,8 @@ class PlanarPushingStartGoalGeometry(LeafSystem):
 
         self.slider_initial_pose = slider_initial_pose
         self.slider_target_pose = slider_target_pose
-        self.pusher_initial_pose = self._rotate_to_world(
-            pusher_initial_pose, slider_initial_pose
-        )
-        self.pusher_target_pose = self._rotate_to_world(
-            pusher_target_pose, slider_target_pose
-        )
+        self.pusher_initial_pose = self._rotate_to_world(pusher_initial_pose, slider_initial_pose)
+        self.pusher_target_pose = self._rotate_to_world(pusher_target_pose, slider_target_pose)
 
         self.DeclareAbstractOutputPort(
             "geometry_pose",
@@ -1366,9 +1271,7 @@ class PlanarPushingStartGoalGeometry(LeafSystem):
 
         TRANSPARENCY = 0.3
 
-        self.slider_frame_id = scene_graph.RegisterFrame(
-            self.source_id, GeometryFrame("slider_start")
-        )
+        self.slider_frame_id = scene_graph.RegisterFrame(self.source_id, GeometryFrame("slider_start"))
         _add_slider_geometries(
             self.source_id,
             slider_geometry,
@@ -1390,9 +1293,7 @@ class PlanarPushingStartGoalGeometry(LeafSystem):
         )
 
     @staticmethod
-    def _rotate_to_world(
-        pusher_pose: PlanarPose, slider_pose: PlanarPose
-    ) -> PlanarPose:
+    def _rotate_to_world(pusher_pose: PlanarPose, slider_pose: PlanarPose) -> PlanarPose:
         p_WP = pusher_pose.pos()
         R_WB = slider_pose.two_d_rot_matrix()
         p_WB = slider_pose.pos()
@@ -1447,12 +1348,14 @@ class PlanarPushingStartGoalGeometry(LeafSystem):
         p_y = p_WB[1, 0]  # type: ignore
 
         slider_pose = RigidTransform(
-            RotationMatrix(R_WB), np.array([p_x, p_y, 0.0])  # type: ignore
+            RotationMatrix(R_WB),
+            np.array([p_x, p_y, 0.0]),  # type: ignore
         )
         output.get_mutable_value().set_value(id=slider_frame_id, value=slider_pose)  # type: ignore
 
         pusher_pose = RigidTransform(
-            RotationMatrix.Identity(), np.concatenate((p_WP.flatten(), [0]))  # type: ignore
+            RotationMatrix.Identity(),
+            np.concatenate((p_WP.flatten(), [0])),  # type: ignore
         )
         output.get_mutable_value().set_value(id=pusher_frame_id, value=pusher_pose)  # type: ignore
 
@@ -1460,9 +1363,7 @@ class PlanarPushingStartGoalGeometry(LeafSystem):
         p_WP = slider_pose.pos() + slider_pose.two_d_rot_matrix().dot(pusher_pose.pos())
         return PlanarPose(p_WP[0, 0], p_WP[1, 0], 0)
 
-    def get_pos_limits(
-        self, slider_geometry, buffer
-    ) -> Tuple[float, float, float, float]:
+    def get_pos_limits(self, slider_geometry, buffer) -> Tuple[float, float, float, float]:
         def get_lims(vecs) -> Tuple[float, float, float, float]:
             vec_xs = [vec[0, 0] for vec in vecs]
             vec_ys = [vec[1, 0] for vec in vecs]
@@ -1490,19 +1391,13 @@ class PlanarPushingStartGoalGeometry(LeafSystem):
                 max(lim_a[3], lim_b[3]),
             )
 
-        p_WB_lims = get_lims(
-            [self.slider_initial_pose.pos(), self.slider_target_pose.pos()]
-        )
+        p_WB_lims = get_lims([self.slider_initial_pose.pos(), self.slider_target_pose.pos()])
         object_radius = slider_geometry.max_dist_from_com
         obj_lims = add_buffer_to_lims(p_WB_lims, object_radius)
         p_WP_lims = get_lims(
             [
-                self._get_pusher_in_world(
-                    self.slider_initial_pose, self.pusher_initial_pose
-                ).pos(),
-                self._get_pusher_in_world(
-                    self.slider_target_pose, self.pusher_target_pose
-                ).pos(),
+                self._get_pusher_in_world(self.slider_initial_pose, self.pusher_initial_pose).pos(),
+                self._get_pusher_in_world(self.slider_target_pose, self.pusher_target_pose).pos(),
             ]
         )
 
@@ -1556,9 +1451,7 @@ class PlanarPushingTrajectoryGeometry(LeafSystem):
 
         self.source_id = scene_graph.RegisterSource()
 
-        self.slider_frame_id = scene_graph.RegisterFrame(
-            self.source_id, GeometryFrame("slider")
-        )
+        self.slider_frame_id = scene_graph.RegisterFrame(self.source_id, GeometryFrame("slider"))
         _add_slider_geometries(
             self.source_id,
             slider_geometry,
@@ -1571,15 +1464,11 @@ class PlanarPushingTrajectoryGeometry(LeafSystem):
             self.source_id,
             GeometryFrame("pusher"),
         )
-        _add_pusher_geometry(
-            self.source_id, pusher_radius, scene_graph, self.pusher_frame_id
-        )
+        _add_pusher_geometry(self.source_id, pusher_radius, scene_graph, self.pusher_frame_id)
 
         GOAL_TRANSPARENCY = 0.3
         if self.visualize_goal:
-            self.slider_goal_frame_id = scene_graph.RegisterFrame(
-                self.source_id, GeometryFrame("slider_goal")
-            )
+            self.slider_goal_frame_id = scene_graph.RegisterFrame(self.source_id, GeometryFrame("slider_goal"))
             _add_slider_geometries(
                 self.source_id,
                 slider_geometry,
@@ -1655,12 +1544,14 @@ class PlanarPushingTrajectoryGeometry(LeafSystem):
         p_y = p_WB[1, 0]  # type: ignore
 
         slider_pose = RigidTransform(
-            RotationMatrix(R_WB), np.array([p_x, p_y, 0.0])  # type: ignore
+            RotationMatrix(R_WB),
+            np.array([p_x, p_y, 0.0]),  # type: ignore
         )
         output.get_mutable_value().set_value(id=slider_frame_id, value=slider_pose)  # type: ignore
 
         pusher_pose = RigidTransform(
-            RotationMatrix.Identity(), np.concatenate((p_WP.flatten(), [0]))  # type: ignore
+            RotationMatrix.Identity(),
+            np.concatenate((p_WP.flatten(), [0])),  # type: ignore
         )
         output.get_mutable_value().set_value(id=pusher_frame_id, value=pusher_pose)  # type: ignore
 
@@ -1734,12 +1625,8 @@ def visualize_planar_pushing_start_and_goal(
 
     x_min, x_max, y_min, y_max = geometry.get_pos_limits(slider_geometry, buffer=0.1)
 
-    def connect_planar_visualizer(
-        builder: DiagramBuilder, scene_graph: SceneGraph
-    ) -> PlanarSceneGraphVisualizer:
-        T_VW = np.array(
-            [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 0.0, 1.0]]
-        )
+    def connect_planar_visualizer(builder: DiagramBuilder, scene_graph: SceneGraph) -> PlanarSceneGraphVisualizer:
+        T_VW = np.array([[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 0.0, 1.0]])
         visualizer = ConnectPlanarSceneGraphVisualizer(
             builder,
             scene_graph,
@@ -1801,12 +1688,8 @@ def visualize_planar_pushing_trajectory(
     else:
         x_min, x_max, y_min, y_max = lims
 
-    def connect_planar_visualizer(
-        builder: DiagramBuilder, scene_graph: SceneGraph
-    ) -> PlanarSceneGraphVisualizer:
-        T_VW = np.array(
-            [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 0.0, 1.0]]
-        )
+    def connect_planar_visualizer(builder: DiagramBuilder, scene_graph: SceneGraph) -> PlanarSceneGraphVisualizer:
+        T_VW = np.array([[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 0.0, 1.0]])
         visualizer = ConnectPlanarSceneGraphVisualizer(
             builder,
             scene_graph,
@@ -1880,9 +1763,7 @@ def visualize_planar_pushing_trajectory_legacy(
         # TODO(bernhardpg): functionality that is useful for debugging
         v_WB = (traj.p_WB[:, 1:] - traj.p_WB[:, :-1]) / 0.1
         object_vel_viz = VisualizationForce2d(traj.p_WB.T, CONTACT_COLOR, v_WB.T)
-        contact_forces_viz.append(
-            object_vel_viz
-        )  # visualize vel as a force (with an arrow)
+        contact_forces_viz.append(object_vel_viz)  # visualize vel as a force (with an arrow)
 
     viz = Visualizer2d()
     FRAMES_PER_SEC = 1 / traj.dt
@@ -1904,20 +1785,11 @@ def visualize_initial_conditions(
     plot_orientation_arrow: bool = False,
 ) -> None:
     slider_target_pose = initial_conditions[0].slider_target_pose
-    assert all(
-        [conds.slider_target_pose == slider_target_pose for conds in initial_conditions]
-    )
+    assert all([conds.slider_target_pose == slider_target_pose for conds in initial_conditions])
     pusher_initial_pose = initial_conditions[0].pusher_initial_pose
-    assert all(
-        [
-            conds.pusher_initial_pose == pusher_initial_pose
-            for conds in initial_conditions
-        ]
-    )
+    assert all([conds.pusher_initial_pose == pusher_initial_pose for conds in initial_conditions])
     pusher_target_pose = initial_conditions[0].pusher_target_pose
-    assert all(
-        [conds.pusher_target_pose == pusher_target_pose for conds in initial_conditions]
-    )
+    assert all([conds.pusher_target_pose == pusher_target_pose for conds in initial_conditions])
 
     slider_initial_poses = [cond.slider_initial_pose for cond in initial_conditions]
     slider_geometry = config.slider_geometry
@@ -2041,9 +1913,7 @@ def visualize_initial_conditions(
             for label, color in zip(["Start", "Goal"], [START_COLOR, GOAL_COLOR])
         ]
         # Creating the custom legend
-        plt.legend(
-            handles=custom_patches, handlelength=2.5, fontsize=22, loc="upper right"
-        )
+        plt.legend(handles=custom_patches, handlelength=2.5, fontsize=22, loc="upper right")
 
     fig.tight_layout()
     if filename:
