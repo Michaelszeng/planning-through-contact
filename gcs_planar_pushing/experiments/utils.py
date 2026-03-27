@@ -172,7 +172,7 @@ def get_hardware_non_collision_cost() -> NonCollisionCost:
 def get_default_plan_config(
     slider_type: Literal["box", "sugar_box", "tee", "arbitrary"] = "box",
     arbitrary_shape_pickle_path: str = "",
-    slider_physical_properties: PhysicalProperties = None,
+    slider_physical_properties: Optional[PhysicalProperties] = None,
     pusher_radius: float = 0.015,
     time_contact: float = 2.0,
     time_non_collision: float = 4.0,
@@ -240,7 +240,7 @@ def get_default_plan_config(
         time_contact = 4.0
         time_non_collision = 2.0
 
-        double_plan_time_in_contact = 1.5
+        double_plan_time_in_contact = 2.5
         double_plan_contact_cost_val = get_double_plan_contact_cost()
         double_plan_non_collision_cost_val = get_double_plan_non_collision_cost()
 

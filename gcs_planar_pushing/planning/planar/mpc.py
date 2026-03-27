@@ -1,3 +1,4 @@
+import copy
 import os
 from typing import List, Optional, Tuple, Union
 
@@ -58,7 +59,9 @@ class PlanarPushingMPC:
         """
         Formulate initial GCS Problem and do full solve
         """
-        self.config = config
+        self.config = copy.deepcopy(
+            config
+        )  # Defensive copy to avoid mutating the original config which might be reused by caller
         self.solver_params = solver_params
         self.double_plan = double_plan
         self.output_folder = output_folder
@@ -66,7 +69,7 @@ class PlanarPushingMPC:
         self.save_video = save_video
         self.interpolate_video = interpolate_video
 
-        self.planner = PlanarPushingPlanner(config)
+        self.planner = PlanarPushingPlanner(self.config)
         self.planner.config.start_and_goal = start_and_goal
         self.planner.formulate_problem()
 
@@ -632,8 +635,6 @@ class PlanarPushingMPC:
         current_pusher_pose: PlanarPose,
         current_pusher_velocity: Optional[npt.NDArray[np.float64]],
         is_in_contact: bool = False,
-        enforce_monotonic_progress: bool = True,
-        soft_source_node_pose_constraint: bool = True,
         output_folder: str = "",
         output_name: str = "",
         save_video: bool = False,
@@ -716,15 +717,10 @@ class PlanarPushingMPC:
                     self.planner.config.start_and_goal.pusher_initial_pose = current_pusher_pose
 
                     # Optionally override time / costs for the double-plan.
-                    time_in_contact_cache = cfg.time_in_contact
                     if cfg.double_plan_time_in_contact is not None:
                         cfg.time_in_contact = cfg.double_plan_time_in_contact
-
-                    contact_cost_cache = cfg.contact_config.cost
                     if cfg.double_plan_contact_cost is not None:
                         cfg.contact_config.cost = cfg.double_plan_contact_cost
-
-                    non_collision_cost_cache = cfg.non_collision_cost
                     if cfg.double_plan_non_collision_cost is not None:
                         cfg.non_collision_cost = cfg.double_plan_non_collision_cost
 
@@ -740,10 +736,6 @@ class PlanarPushingMPC:
                     # FORCE DOUBLE PLAN TO ROUND SOLUTION
                     path = self.planner.plan_path(self.solver_params, store_result=False, rounded=True)
 
-                    # # Restore originals so subsequent normal MPC cycles are unaffected.
-                    # cfg.time_in_contact = time_in_contact_cache
-                    # cfg.contact_config.cost = contact_cost_cache
-                    # cfg.non_collision_cost = non_collision_cost_cache
                     if path is not None:
                         self.original_path = path
                         self.original_traj = path.to_traj(rounded=True)
