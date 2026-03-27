@@ -1,16 +1,15 @@
-# Planning Through Contact
+# MPC for Planar Pushing
 
-## Michael's Notes
-
-Primary Test Scripts:
-- `scripts/planar_pushing/create_plans_simple.py`
-- `scripts/planar_pushing/test_mpc.py`
+This is an MPC implementation of the [GCS-based planar-pushing planner developed by Bernhard Paus Graesdal](https://bernhardgraesdal.com/rss24-towards-tight-convex-relaxations/). This can be paired with any simulator or hardware to generate and accurately follow planar pushing plans like the following:
 
 <p align="center">
   <img src="images/demo_triangle.gif" alt="Demo triangle" width="30%" />
   <img src="images/demo_convex4.gif" alt="Demo convex object" width="30%" />
   <img src="images/demo_tee.gif" alt="Demo T" width="30%" />
 </p>
+
+Note that this is not a true Markovian MPC -- for the sake of runtime, the mode sequence is planned only once at the start of the episode (or twice if `double_plan` is `True`) and then fixed during the rest of the episode.
+
 
 ## 🚀 Installation (Linux and MacOS)
 
@@ -58,22 +57,10 @@ pip install -e .
 
 ## 🦾 Generating planar pushing plans
 
-📘 You can find an introduction notebook to generate planar pushing trajectories [here](https://github.com/bernhardpg/planning-through-contact/blob/introductory-notebook/notebooks/planar_pushing.ipynb).
-
-Otherwise, the main entrypoint for generating planar pushing plans is the
-following script:
+The main entrypoint for generating planar pushing plans is the following script:
 
 ```console
-python scripts/planar_pushing/create_plans.py
-```
-
-which takes a number of command line arguments. Add the flag `--help` for a
-description of these.
-
-For instance, to generate 10 plans for a rectangular slider geometry, run
-
-```console
-python scripts/planar_pushing/create_plans.py --body sugar_box --seed 0 --num 10
+python scripts/planar_pushing/create_plans_simple.py
 ```
 
 which will generate plans that look like this:
@@ -82,47 +69,98 @@ which will generate plans that look like this:
   <img src="images/demo_box.gif" alt="Demo triangle" width="70%" />
 </p>
 
----
 
-## RSS 2024: Towards Tight Convex Relaxations for Contact-Rich Manipulation
+## 🧠 Understanding the MPC implementation
 
-**🌐 Paper website**: [Towards Tight Convex Relaxations for Contact-Rich Manipulation](https://bernhardgraesdal.com/rss24-towards-tight-convex-relaxations/)
+The primary contribution of this work compared the [original planner developed by Bernhard Paus Graesdal](https://bernhardgraesdal.com/rss24-towards-tight-convex-relaxations/) are the following:
+- The API in `gcs_planar_pushing/planning/planar/mpc.py`
+- Modifications to the problem formulation to make it feasible amidst inaccuracies when following the plan closed-loop, including the following:
+  - Softened slider target constraints (quadratic cost + bounding box constraint). This is necessary to allow the MPC to shoot for "best effort" when hitting the target exactly is not possible. 
+  - Softened initial pusher constraint (quadratic cost + bounding box constraint). This is effective projects the pusher pose onto the contact manifold of the slider during contact modes. 
+  - Softened rotational dynamics constraint during rounding. This reduces rounding solver failures.
+- MPC-specific features:
+  - Adding initial velocity constraint to the problem formulation so that MPC plans are consistent with the pusher's current velocity.
+  - "Double Planning": since, for complex slider geometries, the limit surface friction approximation used by the palnner is not accurate and causes a large dynamics gap, the initial mode sequence and plan is often not enough to get the slider close to the target. In such cases, if `double_plan` is `True`, then after the final contact mode, the MPC will generate another full plan (including contact sequence) and execute that, which is usually enough to get the slider very close to the target. This double plan has tighter constraints on the slider target pose, shorter contact modes (since only fine adjustments/small contacts are needed), and differently-tuned costs.
+- Solver parameter tuning (particularly SNOPT's `"Scale option"`). This reduces rounding solver failures.
 
-**📋 Paper**: [arXiv](https://arxiv.org/pdf/2402.10312)
 
-📘 You can find an introduction notebook to generate planar pushing trajectories [here](https://github.com/bernhardpg/planning-through-contact/blob/introductory-notebook/notebooks/planar_pushing.ipynb).
+## ⚙️ Using the MPC API with a simulator or hardware
 
-**If you run into any problems, don't hesitate to reach out or create an issue.**
+`PlanarPushingMPC` (implemented in `gcs_planar_pushing/planning/planar/mpc.py`) is the object your will generally interact with.
 
-### Paper results
+Construct `PlanarPushingMPC` like so: 
 
-💻 The exact code used for generating the results in the paper can be found on the branch: [rss24-towards-tight-convex](https://github.com/bernhardpg/planning-through-contact/tree/rss24-towards-tight-convex).
-The trajectories and data in the paper are generated with `scripts/planar_pushing/create_plans.py`, see the user guide below.
-However, if you are simply interested in using the code, it is recommended to use the updated code on the `main` branch.
+```python
+config = get_default_plan_config(
+    slider_type="arbitrary",
+    arbitrary_shape_pickle_path=arbitrary_shape_pickle_path,
+    pusher_radius=0.015,
+    use_case="drake_iiwa",  # Define your own use case to tune model parameters to your/your simulator's taste
+)
+solver_params = get_default_solver_params()
+start_and_goal = PlanarPushingStartAndGoal(
+    slider_initial_pose=slider_start_pose,
+    slider_target_pose=slider_goal_pose,
+    pusher_initial_pose=pusher_start_pose,
+    pusher_target_pose=pusher_goal_pose,
+)
 
----
-
-## Developers
-
-Before merging a branch to `main`, make sure the unit test pass by running
-
-```console
-pytest
+mpc_planner = PlanarPushingMPC(
+  config=planner_config,
+  solver_params=solver_params,
+  start_and_goal=start_and_goal,
+  planner_freq=10,  # Frequency of MPC planner in Hz
+  double_plan=True,
+  plan=True,
+  output_folder="trajectories_mpc",  # Output folder for generated trajectory data and videos
+  output_name=f"trajectory_trial_{i}",  # Folder (within `output_folder`) to store the data for this particular episode
+  save_video=True,  # Save video of the generated plan
+  interpolate_video=True,  # Interpolate between knot points in video visualization
+)
 ```
 
-(after activating the virtual environment).
+The `PlanarPushingMPC` constructor generates the initial plan/mode sequence.
 
----
+The recommended usage is to write your own `.pkl` files for the desired slider geometry in the `arbitrary_shape_pickles` directory. 
 
-## Other (experimental)
+Within your 10 Hz planning loop, call the `plan` function:
 
-### Running a single hardware experiment
-
-Create a config file specifying the experiment in `config` and run it using the
-following command:
-
-```console
-python scripts/planar_pushing/run_planar_pushing_experiment.py --config-name single_experiment
+```python
+traj, traj_cost = mpc_planner.plan(
+  t=time_since_traj_start,
+  current_slider_pose=current_slider_pose,
+  current_pusher_pose=current_pusher_pose,
+  current_pusher_velocity=current_pusher_vel,
+  is_in_contact=detected_contact,
+  rounded=True,
+  success=success,
+  save_video=True,  # True for debugging; however, this slows the planner down a lot (and accumulates a ton of videos), so recommended to set to False (and remove the below options) during normal running.
+  save_unrounded_video=True,
+  output_folder="trajectories_mpc",
+  output_name=f"trajectory_trial_{i}_timestep_{j}",
+)
+plan_time = time.time()
 ```
 
-where `single_experiment` should be replaced with your config name.
+This uses the updated pusher and slider poses to update the plan (in accordinace with the original plan's mode sequence).
+
+At a much higher frequency (i.e. 1000 Hz), update the target for your lower-level (i.e. Diff IK) controller:
+
+```python
+time_in_traj_to_retrieve_action = time.time() - plan_time + EXECUTION_LATENCY
+action = traj.get_pusher_planar_pose(time_in_traj_to_retrieve_action).vector()[:2]
+
+pusher_penetration_offset = (
+    self.traj.get_pusher_planar_pose(0).vector()[:2] - current_pusher_pose.vector()[:2]
+)  # Difference between actual current pusher pose and generated plan's initial pusher pose
+action -= pusher_penetration_offset
+```
+
+Notes:
+- You must be able to provide a boolean flag `detected_contact` for whether the pusher and slider are currently in contact. This assists the planner in determining what mode it is currently in.
+- If you set `double_plan` to `True`, you must be able to provide a boolean flag `success` for whether the slider has been "successfully" pushed (i.e. within some user-decided tolerance of the success pose). This assists the planner in deciding whether the double plan is actually needed or if it can be skipped.
+- For highest chances of success, set `EXECUTION_LATENCY` to the approximate lag/delay of the pusher behind its commanded pose. This matters -- it helps the pusher stay close its planned position which assists the planner in determining which mode it is currently in.
+- Before sending the action to your low-level controller, subtract a `pusher_penetration_offset`. To understand why this is needed, recall that that the optimization formulation doesn't strictly enforce that the initial pusher pose in the generated plan matches the actual current pusher pose. In fact, when in contact/penetration, the optimization will project the pusher pose onto the contact manifold, causing a significant difference between the initial pusher pose in the generated plan and the actual current pusher pose. If we command the pusher to follow the generated plan blindly, it will jumpy suddenly to match the generated plan's initial pose. Subtracting `pusher_penetration_offset` is a hack to re-align the initial pusher pose in the generated plan and the actual current pusher pose to prevent this jump.
+
+
+Find an example integration for T-pushing with the [Drake simulator](https://drake.mit.edu/) in [this repository](https://github.com/Michaelszeng/diffusion-policy-drake/blob/9f2401827fe38df345b8793ddd585eb255f18ef4/planning_through_contact/simulation/controllers/gcs_planner_controller.py).
