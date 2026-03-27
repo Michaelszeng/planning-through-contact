@@ -1,4 +1,6 @@
 import time
+import matplotlib
+matplotlib.use("Agg")
 
 from planning_through_contact.experiments.utils import get_default_plan_config, get_default_solver_params
 from planning_through_contact.geometry.planar.planar_pose import PlanarPose
