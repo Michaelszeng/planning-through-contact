@@ -80,13 +80,13 @@ The primary contribution of this work compared the [original planner developed b
   - Softened rotational dynamics constraint during rounding. This reduces rounding solver failures.
 - MPC-specific features:
   - Adding initial velocity constraint to the problem formulation so that MPC plans are consistent with the pusher's current velocity.
-  - "Double Planning": since, for complex slider geometries, the limit surface friction approximation used by the palnner is not accurate and causes a large dynamics gap, the initial mode sequence and plan is often not enough to get the slider close to the target. In such cases, if `double_plan` is `True`, then after the final contact mode, the MPC will generate another full plan (including contact sequence) and execute that, which is usually enough to get the slider very close to the target. This double plan has tighter constraints on the slider target pose, shorter contact modes (since only fine adjustments/small contacts are needed), and differently-tuned costs.
+  - "Double Planning": since, for complex slider geometries, the limit surface friction approximation used by the planner is not accurate and causes a large dynamics gap, the initial mode sequence and plan is often not enough to get the slider close to the target. In such cases, if `double_plan` is `True`, then after the final contact mode, the MPC will generate another full plan (including contact sequence) and execute that, which is usually enough to get the slider very close to the target. This double plan has tighter constraints on the slider target pose, shorter contact modes (since only fine adjustments/small contacts are needed), and differently-tuned costs.
 - Solver parameter tuning (particularly SNOPT's `"Scale option"`). This reduces rounding solver failures.
 
 
 ## ⚙️ Using the MPC API with a simulator or hardware
 
-`PlanarPushingMPC` (implemented in `gcs_planar_pushing/planning/planar/mpc.py`) is the object your will generally interact with.
+`PlanarPushingMPC` (implemented in `gcs_planar_pushing/planning/planar/mpc.py`) is the object you will generally interact with.
 
 Construct `PlanarPushingMPC` like so: 
 
@@ -163,4 +163,4 @@ Notes:
 - Before sending the action to your low-level controller, subtract a `pusher_penetration_offset`. To understand why this is needed, recall that that the optimization formulation doesn't strictly enforce that the initial pusher pose in the generated plan matches the actual current pusher pose. In fact, when in contact/penetration, the optimization will project the pusher pose onto the contact manifold, causing a significant difference between the initial pusher pose in the generated plan and the actual current pusher pose. If we command the pusher to follow the generated plan blindly, it will jumpy suddenly to match the generated plan's initial pose. Subtracting `pusher_penetration_offset` is a hack to re-align the initial pusher pose in the generated plan and the actual current pusher pose to prevent this jump.
 
 
-Find an example integration for T-pushing with the [Drake simulator](https://drake.mit.edu/) in [this repository](https://github.com/Michaelszeng/diffusion-policy-drake/blob/9f2401827fe38df345b8793ddd585eb255f18ef4/planning_through_contact/simulation/controllers/gcs_planner_controller.py).
+Find an example integration for T-pushing with the [Drake simulator](https://drake.mit.edu/) in [this repository](https://github.com/Michaelszeng/diffusion-policy-drake/blob/2747d8895e088b0861fddb6a719af86933ea497e/planning_through_contact/simulation/controllers/gcs_planner_controller.py).
