@@ -600,9 +600,10 @@ class PlanarPushingPlanner:
             print(f"    =====================================> _get_rounded_paths time: {time.time() - start}")
             if feasible_paths is None:
                 print("*" * 60 + "\n❌ WARNING: Rounding returned no feasible paths!\n")
-                print("*" * 60 + "\n            Returning unrounded path.\n" + "*" * 60)
-                self.path = self._pick_best_path(paths, rounded=False)
-                return self.path
+                # print("*" * 60 + "\n            Returning unrounded path.\n" + "*" * 60)
+                # self.path = self._pick_best_path(paths, rounded=False)
+                # return self.path
+                return None
             self.path = self._pick_best_path(feasible_paths, rounded=True)
         else:
             self.path = self._pick_best_path(paths, rounded=False)
