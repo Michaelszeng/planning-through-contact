@@ -143,7 +143,6 @@ class PlanarPushingMPC:
         slider_pose: PlanarPose,
         pusher_pose: PlanarPose,
         mode: AbstractContactMode,
-        non_coll_tol: float = 1e-10,
         coll_tol: float = 1e-3,
     ) -> bool:
         """
@@ -173,6 +172,10 @@ class PlanarPushingMPC:
             return True
 
         elif isinstance(mode, NonCollisionMode):
+            # Use the same inflation as the mode's convex set so region assignment is consistent
+            # between planning time and runtime.
+            non_coll_tol = self.planner.config.non_collision_mode_region_inflation
+
             # Firstly, check that pusher is in the collision-free region
             # Region is defined by intersection of half-spaces: a^T x >= b
             # dist_to returns a^T x - b.

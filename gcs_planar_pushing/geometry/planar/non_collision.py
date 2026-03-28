@@ -248,15 +248,16 @@ class NonCollisionMode(AbstractContactMode):
 
         self.dt = self.time_in_mode / self.num_knot_points
 
-        # Small inflation so adjacent regions overlap by 2*EPS at shared boundaries,
+        # Inflate region boundaries so adjacent regions overlap at shared boundaries,
         # preventing the MPC from failing to assign a region when the pusher is near a corner.
-        EPS = 1e-2
+        # Must match the tolerance used in _is_state_in_mode for consistent region assignment.
+        inflation = self.config.non_collision_mode_region_inflation
         self.contact_planes = self.slider_geometry.get_contact_planes(self.contact_location.idx)
         # TODO(bernhardpg): This class should not have a contact_location object. it is not accurate,
         # as it really only has the index of a collision free set, which may or may not correspond
         # 1-1 to a
         self.collision_free_space_planes = [
-            Hyperplane(p.a, p.b - EPS)
+            Hyperplane(p.a, p.b - inflation)
             for p in self.slider_geometry.get_planes_for_collision_free_region(self.contact_location.idx)
         ]
         self.prog = MathematicalProgram()

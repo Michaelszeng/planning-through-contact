@@ -252,6 +252,11 @@ class PlanarPlanConfig:
     double_plan_contact_cost: Optional["ContactCost"] = None
     double_plan_non_collision_cost: Optional["NonCollisionCost"] = None
 
+    # Inflation applied to non-collision region boundaries (b -= inflation).
+    # Adjacent regions overlap by 2*inflation at shared boundaries.
+    # Must match the tolerance used in _is_state_in_mode for consistent region assignment.
+    non_collision_mode_region_inflation: float = 1e-2
+
     @property
     def dt_contact(self) -> float:
         return self.time_in_contact / self.num_knot_points_contact
