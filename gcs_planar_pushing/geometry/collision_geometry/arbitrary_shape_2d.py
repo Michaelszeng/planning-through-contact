@@ -749,6 +749,7 @@ def main() -> None:
         SliderPusherSystemConfig,
     )
 
+    # pickle_path = sys.argv[1] if len(sys.argv) > 1 else "arbitrary_shape_pickles/square_pusher.pkl"
     pickle_path = sys.argv[1] if len(sys.argv) > 1 else "arbitrary_shape_pickles/small_t_pusher.pkl"
     shape = ArbitraryShape2D(pickle_path)
 
@@ -763,7 +764,7 @@ def main() -> None:
 
     # Bounding box for clipping the (unbounded) regions to the plot extent
     all_verts = np.hstack(shape.vertices)
-    margin = 0.05
+    margin = 0.2
     lb = np.array([float(all_verts[0].min()) - margin, float(all_verts[1].min()) - margin])
     ub = np.array([float(all_verts[0].max()) + margin, float(all_verts[1].max()) + margin])
     bbox = opt.HPolyhedron.MakeBox(lb, ub)

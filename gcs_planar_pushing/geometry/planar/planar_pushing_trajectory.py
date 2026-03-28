@@ -1058,6 +1058,9 @@ class SlicedPlanarPushingTrajectory(PlanarPushingTrajectory):
     def get_pusher_velocity(self, t: float) -> npt.NDArray[np.float64]:
         return self._original_traj.get_pusher_velocity(self._slice_start_time + t)
 
+    def get_mode(self, t: float) -> PlanarPushingContactMode:
+        return self._original_traj.get_mode(self._slice_start_time + t)
+
 
 class StationaryPlanarPushingTrajectory(AbstractPlanarPushingTrajectory):
     """

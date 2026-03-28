@@ -23,7 +23,7 @@ from gcs_planar_pushing.geometry.planar.non_collision_subgraph import (
 from gcs_planar_pushing.geometry.planar.planar_pose import PlanarPose
 from gcs_planar_pushing.geometry.planar.planar_pushing_path import PlanarPushingPath
 from gcs_planar_pushing.geometry.planar.planar_pushing_trajectory import (
-    NonCollisionTrajSegment,
+    PlanarPushingTrajectory,
     StationaryPlanarPushingTrajectory,
 )
 from gcs_planar_pushing.planning.planar.planar_plan_config import (
@@ -120,6 +120,7 @@ class PlanarPushingMPC:
         # account for the passage of time during MPC iterations.
         self.previous_short_mode_vertex = None  # Optional[GcsVertex]
         self.current_segment_index = 1  # Start at second mode to skip source node
+        self.current_mode_start_time = 0.0  # t_local when the current mode actually began
         self._was_in_contact = False
 
         # Indicate whether we are currently executing the double plan (as opposed to the original plan).
@@ -134,6 +135,7 @@ class PlanarPushingMPC:
         self.original_traj_start_time = 0.0
         self.traj_start_time = 0.0
         self.current_segment_index = 1  # Start at second mode to skip source node
+        self.current_mode_start_time = 0.0
         print(f"Original Path Mode Sequence: {[pair.vertex.name() for pair in self.original_path.pairs]}")
 
     def _is_state_in_mode(
@@ -254,7 +256,6 @@ class PlanarPushingMPC:
         # modes. We need to do an actual check based on the system state.
         else:
             candidates = [i for i in candidates if isinstance(self.original_path.pairs[i].mode, NonCollisionMode)]
-            print(f"candidates: {candidates}")
 
             # def _time_dist(idx: int) -> float:
             #     seg_start_time = self.original_traj.start_time if idx == 0 else self.original_traj.end_times[idx - 1]
@@ -275,6 +276,7 @@ class PlanarPushingMPC:
                 for i in candidates
                 if self._is_state_in_mode(slider_pose, pusher_pose, self.original_path.pairs[i].mode)
             ]
+            print(f"candidates: {candidates} | valid_indices: {valid_indices}")
 
             if len(valid_indices) == 0:
                 # raise ValueError(f"No mode is valid for the current state somehow. Candidates: {candidates}.")
@@ -314,7 +316,10 @@ class PlanarPushingMPC:
 
                 segment_idx = min(valid_indices, key=_time_dist)
 
-        self.current_segment_index = segment_idx  # Save the segment index for the next iteration
+        # Record actual start time of the new mode
+        if segment_idx != self.current_segment_index:
+            self.current_mode_start_time = t
+        self.current_segment_index = segment_idx
 
         # Extract the region corresponding to the mode index found above
         mode = self.original_path.pairs[segment_idx].mode
@@ -603,20 +608,22 @@ class PlanarPushingMPC:
         """
         Gets the remaining time in the current mode.
         `t` is in the time parameterization of `original_traj` (starts at 0).
+        Time is measured relative to when the mode actually started, not the
+        globally planned start time, so early mode transitions don't bleed
+        extra time into the next mode.
         """
-        traj = self.original_traj
-        end_time = traj.end_times[self.current_segment_index]
-        remaining = end_time - t
-        return remaining
+        idx = self.current_segment_index
+        planned_duration = self.original_traj.end_times[idx] - self.original_traj.start_times[idx]
+        elapsed = t - self.current_mode_start_time
+        return planned_duration - elapsed
 
     def _get_elapsed_time_in_current_mode(self, t: float) -> float:
         """
         Gets the elapsed time since the start of the current mode.
         `t` is in the time parameterization of `original_traj` (starts at 0).
+        Time is measured relative to when the mode actually started.
         """
-        traj = self.original_traj
-        start_time = traj.start_times[self.current_segment_index]
-        return t - start_time
+        return t - self.current_mode_start_time
 
     def _update_mode_timing(self, t: float, segment_idx: int) -> None:
         """
@@ -743,6 +750,7 @@ class PlanarPushingMPC:
                         self.original_traj_start_time = t
                         self.traj_start_time = t
                         self.current_segment_index = 1
+                        self.current_mode_start_time = 0.0
                         self._was_in_contact = False
                         self._executing_double_plan = True
                         print(
@@ -758,20 +766,20 @@ class PlanarPushingMPC:
         ### THIS IS A HACKY (NON-MARKOVIAN) FIX:
         ### If we are in the last 0.3s of the final contact mode, run the latter part of this mode open-loop to prevent
         ### the optimization from creating crazy results.
-        if is_in_contact:
-            if isinstance(current_mode, FaceContactMode):
-                remaining_time = self._get_remaining_time_in_current_mode(t_local)
-                is_last_contact_mode = not any(
-                    isinstance(self.original_path.pairs[i].mode, FaceContactMode)
-                    for i in range(segment_idx + 1, len(self.original_path.pairs))
-                )
-                if is_last_contact_mode and remaining_time <= 0.3 + 1e-3:
-                    print(
-                        f"ℹ️ Remaining time in last contact mode {remaining_time:.4f} <= 0.3s. "
-                        "Returning slice of original traj."
-                    )
-                    self._was_in_contact = True
-                    return self.traj.get_slice(t - self.traj_start_time), 0.0
+        # if is_in_contact:
+        #     if isinstance(current_mode, FaceContactMode):
+        #         remaining_time = self._get_remaining_time_in_current_mode(t_local)
+        #         is_last_contact_mode = not any(
+        #             isinstance(self.original_path.pairs[i].mode, FaceContactMode)
+        #             for i in range(segment_idx + 1, len(self.original_path.pairs))
+        #         )
+        #         if is_last_contact_mode and remaining_time <= 0.3 + 1e-3:
+        #             print(
+        #                 f"ℹ️ Remaining time in last contact mode {remaining_time:.4f} <= 0.3s. "
+        #                 "Returning slice of previous traj."
+        #             )
+        #             self._was_in_contact = True
+        #             return self.traj.get_slice(t - self.traj_start_time), 0.0
         ################################################################################################################
 
         mode_sequence = self._get_remaining_mode_sequence(segment_idx=segment_idx)
@@ -797,14 +805,6 @@ class PlanarPushingMPC:
             )
         ################################################################################################################
 
-        # Remove velocity continuity constraint for the last planning cycle in non-collision mode if transitioning to
-        # another non-collision mode
-        remove_velocity_constraint = (
-            self._get_remaining_time_in_current_mode(t_local) <= 0.1 + 1e-3
-            and isinstance(current_mode, NonCollisionMode)
-            and next_mode is not None
-            and isinstance(next_mode, NonCollisionMode)
-        )
         self._update_initial_poses(
             current_slider_pose,
             current_pusher_pose,
@@ -812,7 +812,7 @@ class PlanarPushingMPC:
             current_pusher_velocity,
             collision_free_region=collision_free_region,
             soft_source_node_pose_constraint=True,
-            enforce_velocity_constraint=not remove_velocity_constraint,
+            enforce_velocity_constraint=True,
         )
 
         path = self.planner.plan_path(
@@ -827,82 +827,117 @@ class PlanarPushingMPC:
         self.traj = path.to_traj(rounded=rounded)
         self.traj_start_time = t
 
-        # Save outputs if requested
-        if path is not None and (save_video or save_traj or save_unrounded_video) and output_folder:
-            os.makedirs(output_folder, exist_ok=True)
-
-            rounded_traj = path.to_traj(rounded=True)
-
-            if save_traj:
-                trajectory_folder = f"{output_folder}/{output_name}/trajectory"
-                os.makedirs(trajectory_folder, exist_ok=True)
-
-                if rounded_traj is not None:
-                    rounded_traj.save(f"{trajectory_folder}/traj.pkl")
-
-                slider_color = COLORS["aquamarine4"].diffuse()
-
-                if rounded_traj is not None:
-                    make_traj_figure(
-                        rounded_traj,
-                        filename=f"{trajectory_folder}/traj",
-                        slider_color=slider_color,
-                        split_on_mode_type=True,
-                        show_workspace=hardware,
-                    )
-                print(f"Saved trajectory to {trajectory_folder}")
-
-            if save_video or save_unrounded_video:
-                # Prepare overlay trajectories if requested
-                overlay_trajs_arg = None
-                if overlay_traj:
-                    # Original trajectory: black for both slider and pusher
-                    original_slider_color = COLORS["black"]
-                    original_pusher_color = COLORS["black"]
-                    # New trajectory: use object colors (slider=aquamarine, pusher=firebrick)
-                    new_slider_color = COLORS["aquamarine4"]
-                    new_pusher_color = COLORS["firebrick3"]
-                    overlay_trajs_arg = [
-                        (self.original_traj, original_slider_color, original_pusher_color),
-                        (rounded_traj, new_slider_color, new_pusher_color),
-                    ]
-
-                if save_video:
-                    if rounded_traj is not None:
-                        os.makedirs(f"{output_folder}", exist_ok=True)
-
-                        visualize_planar_pushing_trajectory(
-                            rounded_traj,
-                            save=True,
-                            filename=f"{output_folder}/{output_name}",
-                            visualize_knot_points=not interpolate_video,
-                            lims=animation_lims,
-                            overlay_trajs=overlay_trajs_arg,
-                        )
-                        print(f"Saved video to {output_folder}/{output_name}")
-
-                if save_unrounded_video:
-                    unrounded_traj = path.to_traj(rounded=False)
-                    if unrounded_traj is not None:
-                        os.makedirs(f"{output_folder}", exist_ok=True)
-
-                        # Create overlay using the unrounded trajectory so it matches the video
-                        unrounded_overlay_trajs_arg = None
-                        if overlay_traj:
-                            unrounded_overlay_trajs_arg = [
-                                (self.original_traj, COLORS["black"], COLORS["black"]),
-                                (unrounded_traj, COLORS["aquamarine4"], COLORS["firebrick3"]),
-                            ]
-
-                        visualize_planar_pushing_trajectory(
-                            unrounded_traj,
-                            save=True,
-                            filename=f"{output_folder}/{output_name}_unrounded",
-                            visualize_knot_points=not interpolate_video,
-                            lims=animation_lims,
-                            overlay_trajs=unrounded_overlay_trajs_arg,
-                        )
-                        print(f"Saved unrounded video to {output_folder}/{output_name}_unrounded")
+        rounded_traj = path.to_traj(rounded=True)
+        unrounded_traj = path.to_traj(rounded=False)
+        self._save_outputs(
+            rounded_traj=rounded_traj,
+            unrounded_traj=unrounded_traj,
+            output_folder=output_folder,
+            output_name=output_name,
+            save_video=save_video,
+            save_traj=save_traj,
+            save_unrounded_video=save_unrounded_video,
+            interpolate_video=interpolate_video,
+            overlay_traj=overlay_traj,
+            animation_lims=animation_lims,
+            hardware=hardware,
+        )
 
         self._was_in_contact = is_in_contact
         return self.traj, path.rounded_cost if rounded else path.relaxed_cost
+
+    def _save_outputs(
+        self,
+        rounded_traj: PlanarPushingTrajectory,
+        unrounded_traj: PlanarPushingTrajectory,
+        output_folder: str,
+        output_name: str,
+        save_video: bool,
+        save_traj: bool,
+        save_unrounded_video: bool,
+        interpolate_video: bool,
+        overlay_traj: bool,
+        animation_lims: Optional[Tuple[float, float, float, float]],
+        hardware: bool,
+    ) -> None:
+        if (
+            (rounded_traj is None and save_video)
+            or (unrounded_traj is None and save_unrounded_video)
+            or not (save_video or save_traj or save_unrounded_video)
+            or not output_folder
+        ):
+            return
+
+        os.makedirs(output_folder, exist_ok=True)
+
+        if save_traj:
+            trajectory_folder = f"{output_folder}/{output_name}/trajectory"
+            os.makedirs(trajectory_folder, exist_ok=True)
+
+            if rounded_traj is not None:
+                rounded_traj.save(f"{trajectory_folder}/traj.pkl")
+
+            slider_color = COLORS["aquamarine4"].diffuse()
+
+            if rounded_traj is not None:
+                make_traj_figure(
+                    rounded_traj,
+                    filename=f"{trajectory_folder}/traj",
+                    slider_color=slider_color,
+                    split_on_mode_type=True,
+                    show_workspace=hardware,
+                )
+            print(f"Saved trajectory to {trajectory_folder}")
+
+        if save_video or save_unrounded_video:
+            # Prepare overlay trajectories if requested
+            overlay_trajs_arg = None
+            if overlay_traj:
+                # Original trajectory: black for both slider and pusher
+                original_slider_color = COLORS["black"]
+                original_pusher_color = COLORS["black"]
+                # New trajectory: use object colors (slider=aquamarine, pusher=firebrick)
+                new_slider_color = COLORS["aquamarine4"]
+                new_pusher_color = COLORS["firebrick3"]
+                overlay_trajs_arg = [
+                    (self.original_traj, original_slider_color, original_pusher_color),
+                    (rounded_traj, new_slider_color, new_pusher_color),
+                ]
+
+            if save_video:
+                if rounded_traj is not None:
+                    os.makedirs(f"{output_folder}", exist_ok=True)
+
+                    visualize_planar_pushing_trajectory(
+                        rounded_traj,
+                        save=True,
+                        filename=f"{output_folder}/{output_name}",
+                        visualize_knot_points=not interpolate_video,
+                        lims=animation_lims,
+                        overlay_trajs=overlay_trajs_arg,
+                        fast_save=True,
+                    )
+                    print(f"Saved video to {output_folder}/{output_name}")
+
+            if save_unrounded_video:
+                if unrounded_traj is not None:
+                    os.makedirs(f"{output_folder}", exist_ok=True)
+
+                    # Create overlay using the unrounded trajectory so it matches the video
+                    unrounded_overlay_trajs_arg = None
+                    if overlay_traj:
+                        unrounded_overlay_trajs_arg = [
+                            (self.original_traj, COLORS["black"], COLORS["black"]),
+                            (unrounded_traj, COLORS["aquamarine4"], COLORS["firebrick3"]),
+                        ]
+
+                    visualize_planar_pushing_trajectory(
+                        unrounded_traj,
+                        save=True,
+                        filename=f"{output_folder}/{output_name}_unrounded",
+                        visualize_knot_points=not interpolate_video,
+                        lims=animation_lims,
+                        overlay_trajs=unrounded_overlay_trajs_arg,
+                        fast_save=True,
+                    )
+                    print(f"Saved unrounded video to {output_folder}/{output_name}_unrounded")

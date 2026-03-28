@@ -148,8 +148,8 @@ def compare_trajs_vertically(
 
             start_transparency = 0.5
             end_transparency = 0.9
-            get_transp_for_frame = (
-                lambda idx, num_points: (end_transparency - start_transparency) * idx / num_points + start_transparency
+            get_transp_for_frame = lambda idx, num_points: (
+                (end_transparency - start_transparency) * idx / num_points + start_transparency
             )
 
             for element_idx, (traj_segment, knot_points) in enumerate(segment_group):
@@ -335,8 +335,8 @@ def compare_trajs(
 
             start_transparency = 0.5
             end_transparency = 0.9
-            get_transp_for_frame = (
-                lambda idx, num_points: (end_transparency - start_transparency) * idx / num_points + start_transparency
+            get_transp_for_frame = lambda idx, num_points: (
+                (end_transparency - start_transparency) * idx / num_points + start_transparency
             )
 
             for element_idx, (traj_segment, knot_points) in enumerate(segment_group):
@@ -589,8 +589,8 @@ def plot_simple_traj(
 
         start_transparency = 0.3
         end_transparency = 1.0
-        get_transp_for_frame = (
-            lambda idx, num_points: (end_transparency - start_transparency) * idx / num_points + start_transparency
+        get_transp_for_frame = lambda idx, num_points: (
+            (end_transparency - start_transparency) * idx / num_points + start_transparency
         )
 
         for t in times:
@@ -808,8 +808,8 @@ def make_traj_figure(
 
         start_transparency = 0.3
         end_transparency = 1.0
-        get_transp_for_frame = (
-            lambda idx, num_points: (end_transparency - start_transparency) * idx / num_points + start_transparency
+        get_transp_for_frame = lambda idx, num_points: (
+            (end_transparency - start_transparency) * idx / num_points + start_transparency
         )
 
         if show_workspace:
@@ -1744,6 +1744,7 @@ def visualize_planar_pushing_trajectory(
     visualize_knot_points: bool = False,
     lims: Optional[Tuple[float, float, float, float]] = None,
     overlay_trajs: Optional[List[Tuple[PlanarPushingTrajectory, RGB, RGB]]] = None,
+    fast_save: bool = False,
 ):
     if save:
         assert filename is not None
@@ -1805,8 +1806,16 @@ def visualize_planar_pushing_trajectory(
     ani = visualizer.get_recording_as_animation()  # type: ignore
 
     if save:
-        # Playback the recording and save the output.
-        ani.save(f"{filename}.mp4", fps=30)
+        if fast_save:
+            from matplotlib.animation import FFMpegWriter
+
+            writer = FFMpegWriter(
+                fps=15,
+                extra_args=["-preset", "ultrafast", "-crf", "28"],
+            )
+            ani.save(f"{filename}.mp4", writer=writer, dpi=72)
+        else:
+            ani.save(f"{filename}.mp4", fps=30)
 
     return ani
 

@@ -106,7 +106,7 @@ def get_default_contact_cost() -> ContactCost:
         keypoint_velocity_regularization=100.0,  # original
         trace=None,  # original
         mode_transition_cost=None,  # original: None
-        # angular_velocity_regularization=10.0,  # original: not set at all
+        angular_velocity_regularization=25.0,  # original: not set at all
         time=1.0,  # original
     )
     return contact_cost
@@ -114,7 +114,7 @@ def get_default_contact_cost() -> ContactCost:
 
 def get_default_non_collision_cost() -> NonCollisionCost:
     non_collision_cost = NonCollisionCost(
-        distance_to_object=0.025,  # original: 0.025
+        distance_to_object=0.025,  # original: 0.1
         pusher_velocity_regularization=10.0,  # original
         pusher_arc_length=10.0,  # original
     )
@@ -127,8 +127,8 @@ def get_double_plan_contact_cost() -> ContactCost:
         force_regularization=10000.0,
         keypoint_velocity_regularization=100.0,
         trace=None,
-        mode_transition_cost=5.0,
-        angular_velocity_regularization=250.0,
+        mode_transition_cost=10000.0,  # minimize number of contat modes in double plan
+        angular_velocity_regularization=50.0,
         time=1.0,
     )
     return contact_cost
@@ -138,7 +138,7 @@ def get_double_plan_non_collision_cost() -> NonCollisionCost:
     non_collision_cost = NonCollisionCost(
         distance_to_object=0.025,
         pusher_velocity_regularization=10.0,
-        pusher_arc_length=4.0,
+        pusher_arc_length=6.0,
     )
     return non_collision_cost
 

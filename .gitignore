@@ -2,6 +2,7 @@
 demos/
 trajectories/
 trajectories_mpc/
+trajectories_*/
 outputs/
 multirun/
 *.pkl
