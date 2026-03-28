@@ -157,6 +157,7 @@ action -= pusher_penetration_offset
 ```
 
 Notes:
+- The `rounded` option determines whether to use the rounded solution or the solution to the relaxed GCS problem. While `rounded=False` produces less accurate solutions, I have personally found that this is more reliable; setting `rounded=True` for some reason seems cause more solver failures on the relaxed problem in subsequent planning steps. 
 - You must be able to provide a boolean flag `detected_contact` for whether the pusher and slider are currently in contact. This assists the planner in determining what mode it is currently in.
 - If you set `double_plan` to `True`, you must be able to provide a boolean flag `success` for whether the slider has been "successfully" pushed (i.e. within some user-decided tolerance of the success pose). This assists the planner in deciding whether the double plan is actually needed or if it can be skipped.
 - For highest chances of success, set `EXECUTION_LATENCY` to the approximate lag/delay of the pusher behind its commanded pose. This matters -- it helps the pusher stay close its planned position which assists the planner in determining which mode it is currently in.
