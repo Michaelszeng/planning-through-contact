@@ -612,9 +612,9 @@ class PlanarPushingPath:
         # solver_options.SetOption(snopt.solver_id(), "Hessian updates", 999999)  # allow updates
         # solver_options.SetOption(snopt.solver_id(), "Hessian frequency", 20)  # reset/refresh frequency
         solver_options.SetOption(snopt.solver_id(), "Linesearch tolerance", 0.9)
-        solver_options.SetOption(snopt.solver_id(), "Elastic mode", 1)
-        solver_options.SetOption(snopt.solver_id(), "Elastic weight", 1e4)
-        solver_options.SetOption(snopt.solver_id(), "Elastic tolerance", 1e-4)
+        # solver_options.SetOption(snopt.solver_id(), "Elastic mode", 1)
+        # solver_options.SetOption(snopt.solver_id(), "Elastic weight", 1e4)
+        # solver_options.SetOption(snopt.solver_id(), "Elastic tolerance", 1e-4)
         solver_options.SetOption(snopt.solver_id(), "Major step limit", 0.2)
 
         mode_prog_vars = np.concatenate([mode.prog.decision_variables() for _, mode in self.pairs])

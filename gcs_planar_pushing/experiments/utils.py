@@ -105,8 +105,8 @@ def get_default_contact_cost() -> ContactCost:
         force_regularization=100000.0,  # original; NOTE: This is multiplied by 1e-4 because we have forces in other units in the optimization problem
         keypoint_velocity_regularization=100.0,  # original
         trace=None,  # original
-        mode_transition_cost=None,  # original: None
-        angular_velocity_regularization=25.0,  # original: not set at all
+        mode_transition_cost=10.0,  # original: None
+        angular_velocity_regularization=50.0,  # original: not set at all
         time=1.0,  # original
     )
     return contact_cost
@@ -127,7 +127,7 @@ def get_double_plan_contact_cost() -> ContactCost:
         force_regularization=10000.0,
         keypoint_velocity_regularization=100.0,
         trace=None,
-        mode_transition_cost=10000.0,  # minimize number of contat modes in double plan
+        mode_transition_cost=50.0,  # minimize number of contact modes in double plan
         angular_velocity_regularization=50.0,
         time=1.0,
     )
