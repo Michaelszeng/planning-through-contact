@@ -260,19 +260,6 @@ class PlanarPushingMPC:
         else:
             candidates = [i for i in candidates if isinstance(self.original_path.pairs[i].mode, NonCollisionMode)]
 
-            # def _time_dist(idx: int) -> float:
-            #     seg_start_time = self.original_traj.start_time if idx == 0 else self.original_traj.end_times[idx - 1]
-            #     seg_end_time = self.original_traj.end_times[idx]
-
-            #     if t < seg_start_time:
-            #         return seg_start_time - t
-            #     elif t > seg_end_time:
-            #         return t - seg_end_time
-            #     else:
-            #         return 0.0  # t is inside the segment
-
-            # segment_idx = min(candidates, key=_time_dist)
-
             # Find all candidate modes that the state *could* be in
             valid_indices = [
                 i
@@ -304,11 +291,14 @@ class PlanarPushingMPC:
             else:
                 print("⚠️ WARNING: Multiple modes are valid for the current state.")
 
+                # Shift planned segment boundaries by accumulated schedule drift so that
+                # early/late mode transitions are reflected in the tiebreaker.
+                planned_start_of_current = self.original_traj.start_times[self.current_segment_index]
+                schedule_drift = self.current_mode_start_time - planned_start_of_current
+
                 def _time_dist(idx: int) -> float:
-                    seg_start_time = (
-                        self.original_traj.start_time if idx == 0 else self.original_traj.end_times[idx - 1]
-                    )
-                    seg_end_time = self.original_traj.end_times[idx]
+                    seg_start_time = self.original_traj.start_times[idx] + schedule_drift
+                    seg_end_time = self.original_traj.end_times[idx] + schedule_drift
 
                     if t < seg_start_time:
                         return seg_start_time - t
@@ -769,20 +759,20 @@ class PlanarPushingMPC:
         ### THIS IS A HACKY (NON-MARKOVIAN) FIX:
         ### If we are in the last 0.3s of the final contact mode, run the latter part of this mode open-loop to prevent
         ### the optimization from creating crazy results.
-        # if is_in_contact:
-        #     if isinstance(current_mode, FaceContactMode):
-        #         remaining_time = self._get_remaining_time_in_current_mode(t_local)
-        #         is_last_contact_mode = not any(
-        #             isinstance(self.original_path.pairs[i].mode, FaceContactMode)
-        #             for i in range(segment_idx + 1, len(self.original_path.pairs))
-        #         )
-        #         if is_last_contact_mode and remaining_time <= 0.3 + 1e-3:
-        #             print(
-        #                 f"ℹ️ Remaining time in last contact mode {remaining_time:.4f} <= 0.3s. "
-        #                 "Returning slice of previous traj."
-        #             )
-        #             self._was_in_contact = True
-        #             return self.traj.get_slice(t - self.traj_start_time), 0.0
+        if is_in_contact:
+            if isinstance(current_mode, FaceContactMode):
+                remaining_time = self._get_remaining_time_in_current_mode(t_local)
+                is_last_contact_mode = not any(
+                    isinstance(self.original_path.pairs[i].mode, FaceContactMode)
+                    for i in range(segment_idx + 1, len(self.original_path.pairs))
+                )
+                if is_last_contact_mode and remaining_time <= 0.3 + 1e-3:
+                    print(
+                        f"ℹ️ Remaining time in last contact mode {remaining_time:.4f} <= 0.3s. "
+                        "Returning slice of previous traj."
+                    )
+                    self._was_in_contact = True
+                    return self.traj.get_slice(t - self.traj_start_time), 0.0
         ################################################################################################################
 
         mode_sequence = self._get_remaining_mode_sequence(segment_idx=segment_idx)
