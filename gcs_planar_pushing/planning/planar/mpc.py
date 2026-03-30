@@ -50,6 +50,7 @@ class PlanarPushingMPC:
         solver_params: PlanarSolverParams,
         planner_freq: float = 10.0,
         double_plan: bool = False,  # Replan from scratch once in the non-collision mode after the last contact
+        full_replan: bool = False,  # Replan from scratch after every contact mode
         plan: bool = True,
         output_folder: str = "",
         output_name: str = "",
@@ -62,8 +63,10 @@ class PlanarPushingMPC:
         self.config = copy.deepcopy(
             config
         )  # Defensive copy to avoid mutating the original config which might be reused by caller
+        self.config_hard_copy = copy.deepcopy(config)
         self.solver_params = solver_params
         self.double_plan = double_plan
+        self.full_replan = full_replan
         self.output_folder = output_folder
         self.output_name = output_name
         self.save_video = save_video
@@ -126,17 +129,44 @@ class PlanarPushingMPC:
         # Indicate whether we are currently executing the double plan (as opposed to the original plan).
         self._executing_double_plan = False
 
+        # Tracks which segment_idx last triggered a full_replan so we don't re-trigger in the same mode.
+        # Reset to None whenever the original path is replaced by a full replan.
+        self._full_replan_last_triggered_segment_idx: Optional[int] = None
+
     def load_original_path(self, filename: str) -> None:
         """Loads the original path from a file."""
         all_pairs = self.planner._get_all_vertex_mode_pairs()
-        self.original_path = PlanarPushingPath.load(filename, self.planner.gcs, all_pairs)
-        self.original_traj = self.original_path.to_traj()
-        self.traj = self.original_traj
-        self.original_traj_start_time = 0.0
-        self.traj_start_time = 0.0
-        self.current_segment_index = 1  # Start at second mode to skip source node
-        self.current_mode_start_time = 0.0
+        path = PlanarPushingPath.load(filename, self.planner.gcs, all_pairs)
+        self._reset_original_path(path, t=0.0, rounded=False)
         print(f"Original Path Mode Sequence: {[pair.vertex.name() for pair in self.original_path.pairs]}")
+
+    def _reset_original_path(
+        self,
+        path: PlanarPushingPath,
+        t: float,
+        rounded: bool,
+        precomputed_traj: Optional[PlanarPushingTrajectory] = None,
+    ) -> None:
+        """
+        Replace the tracked original path with a freshly replanned one and reset all
+        path-tracking state.  Callers are responsible for setting any replan-specific
+        flags (e.g. ``_executing_double_plan``, ``_full_replan_last_triggered_segment_idx``)
+        after this call.
+
+        ``precomputed_traj`` may be supplied when the caller has already called
+        ``path.to_traj()`` before GCS vertices were removed (e.g. in the full_replan
+        two-phase flow where Phase 2 deletes the Phase 1 source vertex before this
+        function is reached).  When provided, it is used directly instead of calling
+        ``path.to_traj(rounded)`` here.
+        """
+        self.original_path = path
+        self.original_traj = precomputed_traj if precomputed_traj is not None else path.to_traj(rounded=rounded)
+        self.traj = self.original_traj
+        self.original_traj_start_time = t
+        self.traj_start_time = t
+        self.current_segment_index = 1
+        self.current_mode_start_time = 0.0
+        self._was_in_contact = False
 
     def _is_state_in_mode(
         self,
@@ -325,56 +355,6 @@ class PlanarPushingMPC:
             collision_free_region = mode.contact_location
 
         return segment_idx, collision_free_region
-
-    # def _get_closest_time_and_segment(
-    #     self,
-    #     current_slider_pose: PlanarPose,
-    #     current_pusher_pose: Optional[PlanarPose],
-    # ) -> Tuple[float, int]:
-    #     """
-    #     Finds the time t and segment index on the original trajectory that minimizes the distance to the current state.
-    #     """
-    #     traj = self.original_traj
-
-    #     target_slider = current_slider_pose
-    #     target_pusher = current_pusher_pose
-
-    #     # Helper to compute distance
-    #     def _dist_at_t(t_: float) -> float:
-    #         slider_pose = traj.get_slider_planar_pose(t_)
-    #         pusher_pose = traj.get_pusher_planar_pose(t_)
-
-    #         # Position error
-    #         pos_err = np.linalg.norm(slider_pose.pos() - target_slider.pos())
-
-    #         # Angle error (handle wrapping)
-    #         th_err = np.abs(slider_pose.theta - target_slider.theta)
-    #         th_err = min(th_err, 2 * np.pi - th_err)
-
-    #         # Pusher error
-    #         pusher_err = 0.0
-    #         if target_pusher is not None:
-    #             pusher_err = np.linalg.norm(pusher_pose.pos() - target_pusher.pos())
-
-    #         return pos_err + 0.5 * th_err + pusher_err
-
-    #     # Coarse search over the trajectory
-    #     NUM_STEPS = 100
-    #     ts = np.linspace(traj.start_time, traj.end_time, NUM_STEPS)
-    #     dists = [_dist_at_t(t) for t in ts]
-    #     best_idx = np.argmin(dists)
-    #     best_t = ts[best_idx]
-
-    #     # Identify the segment index using the trajectory logic
-    #     if hasattr(traj, "_get_curr_segment_idx"):
-    #         segment_idx = traj._get_curr_segment_idx(best_t)  # type: ignore
-    #     else:
-    #         if best_t >= traj.end_time:
-    #             segment_idx = len(traj.traj_segments) - 1
-    #         else:
-    #             segment_idx = np.where(best_t < traj.end_times)[0][0]
-
-    #     return best_t, int(segment_idx)
 
     def _get_remaining_mode_sequence(
         self,
@@ -656,7 +636,11 @@ class PlanarPushingMPC:
         5) Solve the GCS convex restriction
         6) Optionally save trajectory and video outputs
         """
-        # FORCE DOUBLE PLAN TO ROUND SOLUTION
+        assert not (self.double_plan and self.full_replan), (
+            "double_plan and full_replan cannot both be enabled simultaneously."
+        )
+
+        # Force rounded solutions after a double_plan (which always replans with rounding).
         if self._executing_double_plan:
             rounded = True
 
@@ -678,12 +662,12 @@ class PlanarPushingMPC:
         ):
             return StationaryPlanarPushingTrajectory(self.config, current_slider_pose, current_pusher_pose, 1), 0.0
 
-        # Retrieve current and next mode
+        # Retrieve previous, current, and next modes relative to the active segment
+        prev_mode = self.original_path.pairs[segment_idx - 1].mode if segment_idx > 0 else None
         current_mode = self.original_path.pairs[segment_idx].mode
-        if segment_idx + 1 < len(self.original_path.pairs):
-            next_mode = self.original_path.pairs[segment_idx + 1].mode
-        else:
-            next_mode = None
+        next_mode = (
+            self.original_path.pairs[segment_idx + 1].mode if segment_idx + 1 < len(self.original_path.pairs) else None
+        )
 
         ################################################################################################################
         ### Double-plan trigger: replan from scratch once the pusher is 0.3s into the first non-collision mode that
@@ -737,14 +721,7 @@ class PlanarPushingMPC:
                     path = self.planner.plan_path(self.solver_params, store_result=False, rounded=True)
 
                     if path is not None:
-                        self.original_path = path
-                        self.original_traj = path.to_traj(rounded=True)
-                        self.traj = self.original_traj
-                        self.original_traj_start_time = t
-                        self.traj_start_time = t
-                        self.current_segment_index = 1
-                        self.current_mode_start_time = 0.0
-                        self._was_in_contact = False
+                        self._reset_original_path(path, t, rounded=True)
                         self._executing_double_plan = True
                         print(
                             "ℹ️ Double plan successful. New mode sequence: "
@@ -753,6 +730,122 @@ class PlanarPushingMPC:
                         return self.traj, path.rounded_cost if rounded else path.relaxed_cost
                     else:
                         print("❌ Double plan failed. Continuing with original plan.")
+        ################################################################################################################
+
+        ################################################################################################################
+        ### Full-replan trigger: replan from scratch 0.1s into every non-collision mode that immediately follows a
+        ### contact mode. This generalises the double-plan strategy to all contact modes, not just the last one.
+        FULL_REPLAN_DELAY = 0.1  # seconds into the post-contact non-collision mode
+        if not success and self.full_replan and isinstance(current_mode, NonCollisionMode):
+            if isinstance(prev_mode, FaceContactMode) and segment_idx != self._full_replan_last_triggered_segment_idx:
+                elapsed_in_mode = self._get_elapsed_time_in_current_mode(t_local)
+                if elapsed_in_mode >= FULL_REPLAN_DELAY - 1e-3:
+                    # Use rounding only when the slider is already close to the target pose,
+                    # since that indicates this is likely the final corrective replan.
+                    cfg = self.config
+                    pos_err = np.linalg.norm(current_slider_pose.pos() - cfg.start_and_goal.slider_target_pose.pos())
+                    ang_err = abs(current_slider_pose.theta - cfg.start_and_goal.slider_target_pose.theta)
+                    # Use hard-copied config rather than the possibly mutated self.config when checking if replan
+                    # is necessary
+                    replan_rounded = (
+                        pos_err <= 2.0 * self.config_hard_copy.soft_slider_target_eps_pos
+                        and ang_err <= 2.0 * self.config_hard_copy.soft_slider_target_eps_ang
+                    )
+                    print(
+                        f"ℹ️ Full replan triggered: {elapsed_in_mode:.3f}s into post-contact non-collision mode "
+                        f"(rounded={replan_rounded}, pos_err={pos_err:.4f}, ang_err={ang_err:.4f}). "
+                        "Replanning from scratch..."
+                    )
+                    # Mark this segment so we don't retrigger on the next MPC tick.
+                    self._full_replan_last_triggered_segment_idx = segment_idx
+
+                    # When this is the final corrective replan, apply the same tightened tolerances
+                    # and cost/timing overrides used by the double-plan.
+                    if replan_rounded:
+                        cfg.soft_slider_target_eps_pos = cfg.double_plan_soft_slider_target_eps_pos
+                        cfg.soft_slider_target_eps_ang = cfg.double_plan_soft_slider_target_eps_ang
+                        if cfg.double_plan_time_in_contact is not None:
+                            cfg.time_in_contact = cfg.double_plan_time_in_contact
+                        if cfg.double_plan_contact_cost is not None:
+                            cfg.contact_config.cost = cfg.double_plan_contact_cost
+                        if cfg.double_plan_non_collision_cost is not None:
+                            cfg.non_collision_cost = cfg.double_plan_non_collision_cost
+
+                    self.previous_short_mode_vertex = None
+                    self.planner.config.start_and_goal.slider_initial_pose = current_slider_pose
+                    self.planner.config.start_and_goal.pusher_initial_pose = current_pusher_pose
+
+                    self.planner.formulate_problem()
+
+                    # Phase 1: free solve (no mode sequence constraint) to discover the optimal mode sequence.
+                    self._update_initial_poses(
+                        current_slider_pose,
+                        current_pusher_pose,
+                        mode_sequence=[],
+                        current_pusher_velocity=current_pusher_velocity,
+                        collision_free_region=collision_free_region,
+                        soft_source_node_pose_constraint=False,
+                    )
+                    path_p1 = self.planner.plan_path(self.solver_params, store_result=False, rounded=False)
+                    path = path_p1  # default; may be overridden by Phase 2 for cost reporting
+
+                    # Pre-compute Phase 1's trajectory NOW, while its source vertex is still alive.
+                    # Phase 2's _update_initial_poses will delete the Phase 1 source vertex before
+                    # _reset_original_path is reached, making path_p1.to_traj() crash there.
+                    path_p1_traj = path_p1.to_traj(rounded=False) if path_p1 is not None else None
+
+                    if path_p1 is not None and current_pusher_velocity is not None:
+                        # Phase 2: re-solve along the discovered mode sequence with pusher velocity
+                        # continuity enforced on the first mode. We are FULL_REPLAN_DELAY seconds into
+                        # the non-collision mode so the velocity no longer points into the slider,
+                        # making the constraint safe (unlike at the instant of contact release).
+                        mode_sequence_p2 = [pair.vertex.name() for pair in path_p1.pairs]
+                        self.config.time_first_mode = path_p1.pairs[1].mode.time_in_mode
+                        self._was_in_contact = False  # Bypass contact-release guard; velocity is safe to enforce here
+                        self._update_initial_poses(
+                            current_slider_pose,
+                            current_pusher_pose,
+                            mode_sequence=mode_sequence_p2,
+                            current_pusher_velocity=current_pusher_velocity,
+                            collision_free_region=collision_free_region,
+                            soft_source_node_pose_constraint=False,
+                            enforce_velocity_constraint=True,
+                        )
+                        path_p2 = self.planner.plan_path(
+                            self.solver_params,
+                            active_vertices=mode_sequence_p2,
+                            store_result=False,
+                            rounded=replan_rounded,
+                        )
+                        if path_p2 is not None:
+                            path = path_p2
+                        else:
+                            print("⚠️ Full replan phase 2 (velocity constraint) failed; using phase-1 solution.")
+                            self.config.time_first_mode = None
+
+                    if path is not None:
+                        # Always store original_path from Phase 1 so it contains canonical (non-SHORT) mode
+                        # names. The SHORT vertex created in Phase 2 is a temporary MPC construct — it is
+                        # deleted at the start of the next _update_initial_poses call, so storing it in
+                        # original_path would cause a KeyError when the next regular MPC iteration looks up
+                        # the edge ('source', '..._SHORT'). Pass the pre-computed trajectory so that
+                        # _reset_original_path does not call path_p1.to_traj() here, where the Phase 1
+                        # source vertex has already been deleted by Phase 2's _update_initial_poses.
+                        # If Phase 2 succeeded, override original_traj/traj with the velocity-continuous
+                        # result; the timing structure is identical since both phases use the same mode durations.
+                        self._reset_original_path(path_p1, t, rounded=False, precomputed_traj=path_p1_traj)
+                        if path is not path_p1:
+                            self.original_traj = path.to_traj(rounded=replan_rounded)
+                            self.traj = self.original_traj
+                        # Clear the trigger guard so the new path's post-contact modes can fire.
+                        self._full_replan_last_triggered_segment_idx = None
+                        print(
+                            "ℹ️ Full replan successful. New mode sequence: "
+                            f"{[p.vertex.name() for p in self.original_path.pairs[1:]]}"
+                        )
+                        return self.traj, path.rounded_cost if replan_rounded else path.relaxed_cost
+                    else:
+                        print("❌ Full replan failed. Continuing with original plan.")
         ################################################################################################################
 
         ################################################################################################################
