@@ -195,6 +195,12 @@ class NonCollisionSubGraph:
         )
         vertex = self.gcs.AddVertex(mode.get_convex_set(), mode.name)
 
+        # Add soft costs for slider target and finger initial poses
+        if soft_slider_target_constraint:
+            mode.add_soft_slider_target_costs_to_vertex(vertex)
+        if soft_source_node_pose_constraint:
+            mode.add_soft_finger_initial_costs_to_vertex(vertex)
+
         pair = VertexModePair(vertex, mode)
         if initial_or_final == "initial":
             kwargs = {"outgoing": False, "incoming": True}

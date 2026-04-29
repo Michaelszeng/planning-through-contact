@@ -74,7 +74,9 @@ class PlanarPushingPlanner:
         if self.contact_locations is None:
             self.contact_locations = self.slider.geometry.contact_locations
 
-    def formulate_problem(self) -> None:
+    def formulate_problem(
+        self, soft_source_node_pose_constraint: bool = False, soft_slider_target_constraint: bool = False
+    ) -> None:
         assert self.config.start_and_goal is not None
 
         # If we are re-formulating (e.g. MPC double-plan) and we call this function a second time, we must reset any
@@ -92,9 +94,10 @@ class PlanarPushingPlanner:
 
         self.gcs = opt.GraphOfConvexSets()
         self._formulate_contact_modes()
-        self._build_graph()
+        self._build_graph(soft_source_node_pose_constraint, soft_slider_target_constraint)
 
-        # costs for non-collisions are added by each of the separate subgraphs
+        # Add costs for contact modes
+        # NOTE: costs for non-collisions are added by each of the separate subgraphs instead of here
         for m, v in zip(self.contact_modes, self.contact_vertices):
             m.add_cost_to_vertex(v)
 
@@ -119,7 +122,7 @@ class PlanarPushingPlanner:
         for mode in self.contact_modes:
             mode.add_so2_cut(self.slider_pose_initial.theta, self.slider_pose_target.theta)
 
-    def _build_graph(self):
+    def _build_graph(self, soft_source_node_pose_constraint: bool = False, soft_slider_target_constraint: bool = False):
         self.contact_vertices = [self.gcs.AddVertex(mode.get_convex_set(), mode.name) for mode in self.contact_modes]
 
         if self.config.allow_teleportation:
@@ -149,12 +152,16 @@ class PlanarPushingPlanner:
                 self.source_subgraph = self._create_entry_or_exit_subgraph("entry")
                 self.target_subgraph = self._create_entry_or_exit_subgraph("exit")
 
-        # When solving the GCS problem from scratch, we use hard constraints on the source and target poses
-        # THIS COMMENT MAY NOT BE TRUE ANYMORE
         self._set_initial_poses(
-            self.pusher_pose_initial, self.slider_pose_initial, soft_source_node_pose_constraint=False
+            self.pusher_pose_initial,
+            self.slider_pose_initial,
+            soft_source_node_pose_constraint=soft_source_node_pose_constraint,
         )
-        self._set_target_poses(self.pusher_pose_target, self.slider_pose_target, soft_slider_target_constraint=False)
+        self._set_target_poses(
+            self.pusher_pose_target,
+            self.slider_pose_target,
+            soft_slider_target_constraint=soft_slider_target_constraint,
+        )
 
         # Save edges to self.edges
         for edge in self.gcs.Edges():
@@ -300,16 +307,11 @@ class PlanarPushingPlanner:
         soft_source_node_pose_constraint: bool = False,
         soft_slider_target_constraint: bool = False,
     ) -> VertexModePair:
-        set_slider_pose = True
-        terminal_cost = False
-
         mode = NonCollisionMode.create_source_or_target_mode(
             self.config,
             slider_pose,
             pusher_pose,
             initial_or_final,
-            set_slider_pose=set_slider_pose,
-            terminal_cost=terminal_cost,
             collision_free_region=collision_free_region,
             soft_source_node_pose_constraint=soft_source_node_pose_constraint,
             soft_slider_target_constraint=soft_slider_target_constraint,
@@ -319,8 +321,10 @@ class PlanarPushingPlanner:
 
         pair = VertexModePair(vertex, mode)
 
-        if terminal_cost:  # add cost on target vertex
-            mode.add_cost_to_vertex(vertex)
+        if soft_slider_target_constraint:
+            mode.add_soft_slider_target_costs_to_vertex(vertex)
+        if soft_source_node_pose_constraint:
+            mode.add_soft_finger_initial_costs_to_vertex(vertex)
 
         # connect source or target to all contact modes
         if initial_or_final == "initial":

@@ -164,8 +164,6 @@ class NonCollisionVariables(AbstractModeVariables):
 
 @dataclass
 class NonCollisionMode(AbstractContactMode):
-    terminal_cost: bool = False
-
     @classmethod
     def create_from_plan_spec(
         cls,
@@ -173,7 +171,6 @@ class NonCollisionMode(AbstractContactMode):
         config: PlanarPlanConfig,
         name: Optional[str] = None,
         one_knot_point: bool = False,
-        terminal_cost: bool = False,
         time_in_mode: Optional[float] = None,
     ) -> "NonCollisionMode":
         if name is None:
@@ -187,7 +184,6 @@ class NonCollisionMode(AbstractContactMode):
             time_in_mode if time_in_mode is not None else config.time_non_collision,
             contact_location,
             config,
-            terminal_cost,
         )
 
     @classmethod
@@ -198,7 +194,6 @@ class NonCollisionMode(AbstractContactMode):
         pusher_pose_world: PlanarPose,
         initial_or_final: Literal["initial", "final"],
         set_slider_pose: bool = True,
-        terminal_cost: bool = False,
         collision_free_region: Optional[PolytopeContactLocation] = None,
         soft_source_node_pose_constraint: bool = False,
         soft_slider_target_constraint: bool = False,
@@ -227,7 +222,6 @@ class NonCollisionMode(AbstractContactMode):
             config,
             mode_name,
             one_knot_point=True,
-            terminal_cost=terminal_cost,
             time_in_mode=1e-6,  # zero time in source and target
         )
 
@@ -272,6 +266,9 @@ class NonCollisionMode(AbstractContactMode):
         self.l2_norm_costs = []
         self.distance_to_object_cost = []
         self.velocity_reg_cost = None
+        self._soft_slider_pos_cost = None
+        self._soft_slider_ang_cost = None
+        self._soft_finger_initial_pos_cost = None
 
         self.slack_vars = []
 
@@ -303,9 +300,7 @@ class NonCollisionMode(AbstractContactMode):
         return exprs
 
     def _define_cost(self) -> None:
-        if self.num_knot_points == 1 and not self.terminal_cost:
-            # If we have only one knot point we are either a source or target mode, in that
-            # case we don't add any cost (unless explicitly specified)
+        if self.num_knot_points == 1:
             return
 
         self.cost_config = self.config.non_collision_cost
@@ -419,18 +414,18 @@ class NonCollisionMode(AbstractContactMode):
             # angle_cost = W_ANG * (1 - cos_t * self.variables.cos_th - sin_t * self.variables.sin_th)
             # self.prog.AddLinearCost(angle_cost)
         else:
-            W_POS = 1e5
-            W_ANG = 2e3
+            W_POS = 5e3
+            W_ANG = 1e3
             EPS_POS = float(getattr(self.config, "soft_slider_target_eps_pos", 0.015))
             EPS_ANG = float(getattr(self.config, "soft_slider_target_eps_ang", 0.075))
 
             cos_t, sin_t = np.cos(pose.theta), np.sin(pose.theta)
 
-            # Bounding box around target to keep the convex set compact
-            self.prog.AddBoundingBoxConstraint(pose.x - EPS_POS, pose.x + EPS_POS, self.variables.p_WB_x)
-            self.prog.AddBoundingBoxConstraint(pose.y - EPS_POS, pose.y + EPS_POS, self.variables.p_WB_y)
-            self.prog.AddBoundingBoxConstraint(cos_t - EPS_ANG, cos_t + EPS_ANG, self.variables.cos_th)
-            self.prog.AddBoundingBoxConstraint(sin_t - EPS_ANG, sin_t + EPS_ANG, self.variables.sin_th)
+            # # Bounding box around target to keep the convex set compact
+            # self.prog.AddBoundingBoxConstraint(pose.x - EPS_POS, pose.x + EPS_POS, self.variables.p_WB_x)
+            # self.prog.AddBoundingBoxConstraint(pose.y - EPS_POS, pose.y + EPS_POS, self.variables.p_WB_y)
+            # self.prog.AddBoundingBoxConstraint(cos_t - EPS_ANG, cos_t + EPS_ANG, self.variables.cos_th)
+            # self.prog.AddBoundingBoxConstraint(sin_t - EPS_ANG, sin_t + EPS_ANG, self.variables.sin_th)
 
             # Quadratic cost on position error: W_POS * ||p - p_target||^2
             pos_vars = np.array([self.variables.p_WB_x, self.variables.p_WB_y])
@@ -438,11 +433,11 @@ class NonCollisionMode(AbstractContactMode):
             Q = 2 * W_POS * np.eye(2)
             b = -2 * W_POS * pos_target
             c = W_POS * pos_target @ pos_target
-            self.prog.AddQuadraticCost(Q, b, c, pos_vars, is_convex=True)
+            self._soft_slider_pos_cost = self.prog.AddQuadraticCost(Q, b, c, pos_vars, is_convex=True)
 
             # Linear cost on angle error: W_ANG * (1 - cos(dθ))
             angle_cost = W_ANG * (1 - cos_t * self.variables.cos_th - sin_t * self.variables.sin_th)
-            self.prog.AddLinearCost(angle_cost)
+            self._soft_slider_ang_cost = self.prog.AddLinearCost(angle_cost)
 
     def set_finger_initial_pose(self, pose: PlanarPose, soft_source_node_pose_constraint: bool = False) -> None:
         """
@@ -452,7 +447,7 @@ class NonCollisionMode(AbstractContactMode):
         if not soft_source_node_pose_constraint:
             self.prog.AddLinearConstraint(eq(self.variables.p_BPs[0], pose.pos()))
         else:
-            W = 1e6
+            W = 5e3
             EPS_XY = 0.00125
 
             p = pose.pos().flatten()
@@ -474,7 +469,9 @@ class NonCollisionMode(AbstractContactMode):
             Q = 2 * W * np.eye(2)
             b = -2 * W * p
             c = W * p @ p
-            self.prog.AddQuadraticCost(Q, b, c, self.variables.p_BPs[0].flatten(), is_convex=True)
+            self._soft_finger_initial_pos_cost = self.prog.AddQuadraticCost(
+                Q, b, c, self.variables.p_BPs[0].flatten(), is_convex=True
+            )
 
     def set_finger_final_pose(self, pose: PlanarPose) -> None:
         """
@@ -608,6 +605,22 @@ class NonCollisionMode(AbstractContactMode):
     def _get_cost_terms(self, cost: Binding) -> Tuple[List[int], QuadraticCost]:  # type: ignore
         var_idxs = self.get_variable_indices_in_gcs_vertex(cost.variables())
         return var_idxs, cost.evaluator()
+
+    def add_soft_slider_target_costs_to_vertex(self, vertex: GcsVertex) -> None:
+        if self._soft_slider_pos_cost is not None:
+            var_idxs, evaluator = self._get_cost_terms(self._soft_slider_pos_cost)
+            vars = vertex.x()[var_idxs]
+            vertex.AddCost(Binding[QuadraticCost](evaluator, vars))
+        if self._soft_slider_ang_cost is not None:
+            var_idxs, evaluator = self._get_cost_terms(self._soft_slider_ang_cost)
+            vars = vertex.x()[var_idxs]
+            vertex.AddCost(Binding[LinearCost](evaluator, vars))
+
+    def add_soft_finger_initial_costs_to_vertex(self, vertex: GcsVertex) -> None:
+        if self._soft_finger_initial_pos_cost is not None:
+            var_idxs, evaluator = self._get_cost_terms(self._soft_finger_initial_pos_cost)
+            vars = vertex.x()[var_idxs]
+            vertex.AddCost(Binding[QuadraticCost](evaluator, vars))
 
     def add_cost_to_vertex(self, vertex: GcsVertex) -> None:
         if self.cost_config.pusher_velocity_regularization is not None:
